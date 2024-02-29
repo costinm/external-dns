@@ -19,15 +19,15 @@ package source
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	v1 "sigs.k8s.io/gateway-api/apis/v1"
+	v1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 	informers "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions"
-	informers_v1 "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions/apis/v1"
+	informers_v1 "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions/apis/v1beta1"
 )
 
 // NewGatewayHTTPRouteSource creates a new Gateway HTTPRoute source with the given config.
 func NewGatewayHTTPRouteSource(clients ClientGenerator, config *Config) (Source, error) {
 	return newGatewayRouteSource(clients, config, "HTTPRoute", func(factory informers.SharedInformerFactory) gatewayRouteInformer {
-		return &gatewayHTTPRouteInformer{factory.Gateway().V1().HTTPRoutes()}
+		return &gatewayHTTPRouteInformer{factory.Gateway().V1beta1().HTTPRoutes()}
 	})
 }
 
@@ -36,7 +36,7 @@ type gatewayHTTPRoute struct{ route v1.HTTPRoute } // NOTE: Must update TypeMeta
 func (rt *gatewayHTTPRoute) Object() kubeObject           { return &rt.route }
 func (rt *gatewayHTTPRoute) Metadata() *metav1.ObjectMeta { return &rt.route.ObjectMeta }
 func (rt *gatewayHTTPRoute) Hostnames() []v1.Hostname     { return rt.route.Spec.Hostnames }
-func (rt *gatewayHTTPRoute) Protocol() v1.ProtocolType    { return v1.HTTPProtocolType }
+func (rt *gatewayHTTPRoute) Protocol() v1.ProtocolType    { return "HTTP" }
 func (rt *gatewayHTTPRoute) RouteStatus() v1.RouteStatus  { return rt.route.Status.RouteStatus }
 
 type gatewayHTTPRouteInformer struct {

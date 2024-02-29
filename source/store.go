@@ -231,6 +231,8 @@ func BuildWithConfig(ctx context.Context, source string, p ClientGenerator, cfg 
 			return nil, err
 		}
 		return NewPodSource(ctx, client, cfg.Namespace, cfg.Compatibility)
+	case "gateway":
+		return NewGatewaySource(p, cfg)
 	case "gateway-httproute":
 		return NewGatewayHTTPRouteSource(p, cfg)
 	case "gateway-grpcroute":

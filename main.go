@@ -419,7 +419,8 @@ func main() {
 	}
 
 	if cfg.WebhookServer {
-		webhookapi.StartHTTPApi(p, nil, cfg.WebhookProviderReadTimeout, cfg.WebhookProviderWriteTimeout, "127.0.0.1:8888")
+		// TODO(costin): listen address (assume mesh or frontend authz)
+		webhookapi.StartHTTPApi(p, nil, cfg.WebhookProviderReadTimeout, cfg.WebhookProviderWriteTimeout, ":8080")
 		os.Exit(0)
 	}
 

@@ -169,6 +169,14 @@ type EndpointKey struct {
 	SetIdentifier string
 }
 
+// TODO: make it consistent with miekg RR
+// DNSName -> Name
+// RecordType -> Rrtype
+// ? -> Class
+// RecordTTL -> Ttl
+//
+// Targets is an array of strings, should be interpreted as a value in zone format.
+
 // Endpoint is a high-level way of a connection between a service and an IP
 type Endpoint struct {
 	// The hostname of the DNS record

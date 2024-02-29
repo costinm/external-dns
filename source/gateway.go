@@ -33,10 +33,10 @@ import (
 	kubeinformers "k8s.io/client-go/informers"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	cache "k8s.io/client-go/tools/cache"
-	v1 "sigs.k8s.io/gateway-api/apis/v1"
+	v1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 	gateway "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 	informers "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions"
-	informers_v1 "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions/apis/v1"
+	informers_v1 "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions/apis/v1beta1"
 
 	"sigs.k8s.io/external-dns/endpoint"
 )
@@ -80,6 +80,7 @@ func newGatewayInformerFactory(client gateway.Interface, namespace string, label
 	return informers.NewSharedInformerFactoryWithOptions(client, 0, opts...)
 }
 
+// gatewayRouteSource extracts DNS entries from K8S routes or Gateways
 type gatewayRouteSource struct {
 	gwNamespace string
 	gwLabels    labels.Selector
@@ -89,13 +90,20 @@ type gatewayRouteSource struct {
 	rtNamespace   string
 	rtLabels      labels.Selector
 	rtAnnotations labels.Selector
-	rtInformer    gatewayRouteInformer
+
+	// rtInformer is the informer for the routes. Will be nil if the source is directly using Gateway
+	rtInformer gatewayRouteInformer
 
 	nsInformer coreinformers.NamespaceInformer
 
 	fqdnTemplate             *template.Template
 	combineFQDNAnnotation    bool
 	ignoreHostnameAnnotation bool
+}
+
+// NewGatewaySource creates a new Gateway source with the given config.
+func NewGatewaySource(clients ClientGenerator, config *Config) (Source, error) {
+	return newGatewayRouteSource(clients, config, "Gateway", nil)
 }
 
 func newGatewayRouteSource(clients ClientGenerator, config *Config, kind string, newInformerFn newGatewayRouteInformerFunc) (Source, error) {
@@ -124,27 +132,32 @@ func newGatewayRouteSource(clients ClientGenerator, config *Config, kind string,
 	}
 
 	informerFactory := newGatewayInformerFactory(client, config.GatewayNamespace, gwLabels)
-	gwInformer := informerFactory.Gateway().V1().Gateways() // TODO: Gateway informer should be shared across gateway sources.
-	gwInformer.Informer()                                   // Register with factory before starting.
+
+	gwInformer := informerFactory.Gateway().V1beta1().Gateways() // TODO: Gateway informer should be shared across gateway sources.
+	gwInformer.Informer()                                        // Register with factory before starting.
 
 	rtInformerFactory := informerFactory
 	if config.Namespace != config.GatewayNamespace || !selectorsEqual(rtLabels, gwLabels) {
 		rtInformerFactory = newGatewayInformerFactory(client, config.Namespace, rtLabels)
 	}
-	rtInformer := newInformerFn(rtInformerFactory)
-	rtInformer.Informer() // Register with factory before starting.
-
+	var rtInformer gatewayRouteInformer
+	if newInformerFn != nil {
+		rtInformer = newInformerFn(rtInformerFactory)
+		rtInformer.Informer() // Register with factory before starting.
+	}
 	kubeClient, err := clients.KubeClient()
 	if err != nil {
 		return nil, err
 	}
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, 0)
+
 	nsInformer := kubeInformerFactory.Core().V1().Namespaces() // TODO: Namespace informer should be shared across gateway sources.
 	nsInformer.Informer()                                      // Register with factory before starting.
 
 	informerFactory.Start(wait.NeverStop)
 	kubeInformerFactory.Start(wait.NeverStop)
+
 	if rtInformerFactory != informerFactory {
 		rtInformerFactory.Start(wait.NeverStop)
 
@@ -152,6 +165,7 @@ func newGatewayRouteSource(clients ClientGenerator, config *Config, kind string,
 			return nil, err
 		}
 	}
+	// TODO: seems to timeout...
 	if err := waitForCacheSync(ctx, informerFactory); err != nil {
 		return nil, err
 	}
@@ -183,12 +197,64 @@ func (src *gatewayRouteSource) AddEventHandler(ctx context.Context, handler func
 	log.Debugf("Adding event handlers for %s", src.rtKind)
 	eventHandler := eventHandlerFunc(handler)
 	src.gwInformer.Informer().AddEventHandler(eventHandler)
-	src.rtInformer.Informer().AddEventHandler(eventHandler)
+	if src.rtInformer != nil {
+		src.rtInformer.Informer().AddEventHandler(eventHandler)
+	}
 	src.nsInformer.Informer().AddEventHandler(eventHandler)
 }
 
 func (src *gatewayRouteSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	var endpoints []*endpoint.Endpoint
+
+	if src.rtInformer == nil {
+		gateways, err := src.gwInformer.Lister().Gateways(src.gwNamespace).List(src.gwLabels)
+		if err != nil {
+			return nil, err
+		}
+		namespaces, err := src.nsInformer.Lister().List(labels.Everything())
+		if err != nil {
+			return nil, err
+		}
+		kind := strings.ToLower(src.rtKind)
+		resolver := newGatewayRouteResolver(src, gateways, namespaces)
+
+		for _, gw := range gateways {
+			// Filter by annotations.
+			meta := gw
+			annots := gw.Annotations
+			if !src.rtAnnotations.Matches(labels.Set(annots)) {
+				continue
+			}
+
+			// Check controller annotation to see if we are responsible.
+			if v, ok := annots[controllerAnnotationKey]; ok && v != controllerAnnotationValue {
+				log.Debugf("Skipping %s %s/%s because controller value does not match, found: %s, required: %s",
+					src.rtKind, meta.Namespace, meta.Name, v, controllerAnnotationValue)
+				continue
+			}
+
+			// Get Route hostnames and their targets.
+			hostTargets, err := resolver.resolveGateway(gw)
+			if err != nil {
+				return nil, err
+			}
+			if len(hostTargets) == 0 {
+				log.Debugf("No endpoints could be generated from %s %s/%s", src.rtKind, meta.Namespace, meta.Name)
+				continue
+			}
+
+			// Create endpoints from hostnames and targets.
+			resource := fmt.Sprintf("%s/%s/%s", kind, meta.Namespace, meta.Name)
+			providerSpecific, setIdentifier := getProviderSpecificAnnotations(annots)
+			ttl := getTTLFromAnnotations(annots, resource)
+			for host, targets := range hostTargets {
+				endpoints = append(endpoints, endpointsForHostname(host, targets, ttl, providerSpecific, setIdentifier, resource)...)
+			}
+			log.Debugf("Endpoints generated from %s %s/%s: %v", src.rtKind, meta.Namespace, meta.Name, endpoints)
+		}
+		return endpoints, nil
+	}
+
 	routes, err := src.rtInformer.List(src.rtNamespace, src.rtLabels)
 	if err != nil {
 		return nil, err
@@ -279,6 +345,44 @@ func newGatewayRouteResolver(src *gatewayRouteSource, gateways []*v1.Gateway, na
 		gws: gws,
 		nss: nss,
 	}
+}
+
+func (c *gatewayRouteResolver) resolveGateway(gw *v1.Gateway) (map[string]endpoint.Targets, error) {
+	hostTargets := make(map[string]endpoint.Targets)
+
+	// Match the Route to all possible Listeners.
+	listeners := gw.Spec.Listeners
+	for _, lis := range listeners {
+		if lis.Hostname == nil {
+			continue
+		}
+		host := string(*lis.Hostname)
+		if host == "" {
+			continue
+		}
+		// Use the target annotation first
+		override := getTargetsFromTargetAnnotation(gw.Annotations)
+
+		if len(override) == 0 {
+			if len(gw.Spec.Addresses) > 0 {
+				for _, addr := range gw.Spec.Addresses {
+					hostTargets[host] = append(hostTargets[host], addr.Value)
+				}
+			} else {
+				for _, addr := range gw.Status.Addresses {
+					hostTargets[host] = append(hostTargets[host], addr.Value)
+				}
+			}
+		} else {
+			hostTargets[host] = append(hostTargets[host], override...)
+		}
+	}
+	// If a Gateway has multiple matching Listeners for the same host, then we'll
+	// add its IPs to the target list multiple times and should dedupe them.
+	for host, targets := range hostTargets {
+		hostTargets[host] = uniqueTargets(targets)
+	}
+	return hostTargets, nil
 }
 
 func (c *gatewayRouteResolver) resolve(rt gatewayRoute) (map[string]endpoint.Targets, error) {
@@ -396,40 +500,40 @@ func (c *gatewayRouteResolver) hosts(rt gatewayRoute) ([]string, error) {
 }
 
 func (c *gatewayRouteResolver) routeIsAllowed(gw *v1.Gateway, lis *v1.Listener, rt gatewayRoute) bool {
-	meta := rt.Metadata()
+	//meta := rt.Metadata()
 	allow := lis.AllowedRoutes
 
-	// Check the route's namespace.
-	from := v1.NamespacesFromSame
-	if allow != nil && allow.Namespaces != nil && allow.Namespaces.From != nil {
-		from = *allow.Namespaces.From
-	}
-	switch from {
-	case v1.NamespacesFromAll:
-		// OK
-	case v1.NamespacesFromSame:
-		if gw.Namespace != meta.Namespace {
-			return false
-		}
-	case v1.NamespacesFromSelector:
-		selector, err := metav1.LabelSelectorAsSelector(allow.Namespaces.Selector)
-		if err != nil {
-			log.Debugf("Gateway %s/%s section %q has invalid namespace selector: %v", gw.Namespace, gw.Name, lis.Name, err)
-			return false
-		}
-		// Get namespace.
-		ns, ok := c.nss[meta.Namespace]
-		if !ok {
-			log.Errorf("Namespace not found for %s %s/%s", c.src.rtKind, meta.Namespace, meta.Name)
-			return false
-		}
-		if !selector.Matches(labels.Set(ns.Labels)) {
-			return false
-		}
-	default:
-		log.Debugf("Gateway %s/%s section %q has unknown namespace from %q", gw.Namespace, gw.Name, lis.Name, from)
-		return false
-	}
+	//// Check the route's namespace.
+	//from := v1.NamespacesFromSame
+	//if allow != nil && allow.Namespaces != nil && allow.Namespaces.From != nil {
+	//	from = *allow.Namespaces.From
+	//}
+	//switch from {
+	//case v1.NamespacesFromAll:
+	//	// OK
+	//case v1.NamespacesFromSame:
+	//	if gw.Namespace != meta.Namespace {
+	//		return false
+	//	}
+	//case v1.NamespacesFromSelector:
+	//	selector, err := metav1.LabelSelectorAsSelector(allow.Namespaces.Selector)
+	//	if err != nil {
+	//		log.Debugf("Gateway %s/%s section %q has invalid namespace selector: %v", gw.Namespace, gw.Name, lis.Name, err)
+	//		return false
+	//	}
+	//	// Get namespace.
+	//	ns, ok := c.nss[meta.Namespace]
+	//	if !ok {
+	//		log.Errorf("Namespace not found for %s %s/%s", c.src.rtKind, meta.Namespace, meta.Name)
+	//		return false
+	//	}
+	//	if !selector.Matches(labels.Set(ns.Labels)) {
+	//		return false
+	//	}
+	//default:
+	//	log.Debugf("Gateway %s/%s section %q has unknown namespace from %q", gw.Namespace, gw.Name, lis.Name, from)
+	//	return false
+	//}
 
 	// Check the route's kind, if any are specified by the listener.
 	// TODO: Do we need to consider SupportedKinds in the ListenerStatus instead of the Spec?
@@ -478,16 +582,16 @@ func uniqueTargets(targets endpoint.Targets) endpoint.Targets {
 // where HTTP and HTTPS are considered the same.
 // and TLS and TCP are considered the same.
 func gwProtocolMatches(a, b v1.ProtocolType) bool {
-	if a == v1.HTTPSProtocolType {
-		a = v1.HTTPProtocolType
-	}
-	if b == v1.HTTPSProtocolType {
-		b = v1.HTTPProtocolType
-	}
-	// if Listener is TLS and Route is TCP set Listener type to TCP as to pass true and return valid match
-	if a == v1.TCPProtocolType && b == v1.TLSProtocolType {
-		b = v1.TCPProtocolType
-	}
+	//if a == v1.HTTPSProtocolType {
+	//	a = v1.HTTPProtocolType
+	//}
+	//if b == v1.HTTPSProtocolType {
+	//	b = v1.HTTPProtocolType
+	//}
+	//// if Listener is TLS and Route is TCP set Listener type to TCP as to pass true and return valid match
+	//if a == v1.TCPProtocolType && b == v1.TLSProtocolType {
+	//	b = v1.TCPProtocolType
+	//}
 	return a == b
 }
 

@@ -51,6 +51,16 @@ type Provider interface {
 	GetDomainFilter() endpoint.DomainFilter
 }
 
+type ProviderConfig struct {
+	Name string
+	// only consider hosted zones managing domains ending in this suffix
+	DomainFilter endpoint.DomainFilter
+	// filter for zones based on visibility
+	ZoneTypeFilter ZoneTypeFilter
+	// only consider hosted zones ending with this zone id
+	ZoneIDFilter ZoneIDFilter
+}
+
 type BaseProvider struct{}
 
 func (b BaseProvider) AdjustEndpoints(endpoints []*endpoint.Endpoint) ([]*endpoint.Endpoint, error) {

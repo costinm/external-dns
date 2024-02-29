@@ -255,7 +255,7 @@ func (p *GoogleProvider) SupportedRecordType(recordType string) bool {
 	case "MX":
 		return true
 	default:
-		return provider.SupportedRecordType(recordType)
+		return true // provider.SupportedRecordType(recordType)
 	}
 }
 

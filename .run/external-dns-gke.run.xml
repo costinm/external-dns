@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="external-dns-gke" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <module name="external-dns" />
+    <working_directory value="$PROJECT_DIR$" />
+    <parameters value="--log-level=debug --source=istio-virtualservice --domain-filter=internal. --source=service --provider=google" />
+    <kind value="PACKAGE" />
+    <package value="sigs.k8s.io/external-dns" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/main.go" />
+    <method v="2" />
+  </configuration>
+</component>
