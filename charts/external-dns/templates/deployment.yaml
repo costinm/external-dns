@@ -61,6 +61,10 @@ spec:
       {{- with .Values.dnsPolicy }}
       dnsPolicy: {{ . }}
       {{- end }}
+      {{- with .Values.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.initContainers }}
       initContainers:
         {{- toYaml . | nindent 8 }}
@@ -103,6 +107,9 @@ spec:
             {{- end }}
             {{- range .Values.domainFilters }}
             - --domain-filter={{ . }}
+            {{- end }}
+            {{- range .Values.excludeDomains }}
+            - --exclude-domains={{ . }}
             {{- end }}
             - --provider={{ $providerName }}
           {{- range .Values.extraArgs }}
