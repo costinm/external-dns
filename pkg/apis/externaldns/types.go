@@ -84,6 +84,7 @@ type Config struct {
 	AWSZoneType                        string
 	AWSZoneTagFilter                   []string
 	AWSAssumeRole                      string
+	AWSProfiles                        []string
 	AWSAssumeRoleExternalID            string
 	AWSBatchChangeSize                 int
 	AWSBatchChangeSizeBytes            int
@@ -101,6 +102,7 @@ type Config struct {
 	AzureResourceGroup                 string
 	AzureSubscriptionID                string
 	AzureUserAssignedIdentityClientID  string
+	AzureActiveDirectoryAuthorityHost  string
 	BluecatDNSConfiguration            string
 	BluecatConfigFile                  string
 	BluecatDNSView                     string
@@ -119,18 +121,6 @@ type Config struct {
 	AkamaiAccessToken                  string
 	AkamaiEdgercPath                   string
 	AkamaiEdgercSection                string
-	InfobloxGridHost                   string
-	InfobloxWapiPort                   int
-	InfobloxWapiUsername               string
-	InfobloxWapiPassword               string `secure:"yes"`
-	InfobloxWapiVersion                string
-	InfobloxSSLVerify                  bool
-	InfobloxView                       string
-	InfobloxMaxResults                 int
-	InfobloxFQDNRegEx                  string
-	InfobloxNameRegEx                  string
-	InfobloxCreatePTR                  bool
-	InfobloxCacheDuration              int
 	DynCustomerName                    string
 	DynUsername                        string
 	DynPassword                        string `secure:"yes"`
@@ -291,17 +281,6 @@ var defaultConfig = &Config{
 	AkamaiAccessToken:           "",
 	AkamaiEdgercSection:         "",
 	AkamaiEdgercPath:            "",
-	InfobloxGridHost:            "",
-	InfobloxWapiPort:            443,
-	InfobloxWapiUsername:        "admin",
-	InfobloxWapiPassword:        "",
-	InfobloxWapiVersion:         "2.3.1",
-	InfobloxSSLVerify:           true,
-	InfobloxView:                "",
-	InfobloxMaxResults:          0,
-	InfobloxFQDNRegEx:           "",
-	InfobloxCreatePTR:           false,
-	InfobloxCacheDuration:       0,
 	OCIConfigFile:               "/etc/kubernetes/oci.yaml",
 	OCIZoneScope:                "GLOBAL",
 	OCIZoneCacheDuration:        0 * time.Second,
@@ -474,7 +453,7 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("traefik-disable-new", "Disable listeners on Resources under the traefik.io API Group").Default(strconv.FormatBool(defaultConfig.TraefikDisableNew)).BoolVar(&cfg.TraefikDisableNew)
 
 	// Flags related to providers
-	providers := []string{"akamai", "alibabacloud", "aws", "aws-sd", "azure", "azure-dns", "azure-private-dns", "bluecat", "civo", "cloudflare", "coredns", "designate", "digitalocean", "dnsimple", "dyn", "exoscale", "gandi", "godaddy", "google", "ibmcloud", "infoblox", "inmemory", "linode", "ns1", "oci", "ovh", "pdns", "pihole", "plural", "rcodezero", "rdns", "rfc2136", "safedns", "scaleway", "skydns", "tencentcloud", "transip", "ultradns", "vinyldns", "vultr", "webhook"}
+	providers := []string{"akamai", "alibabacloud", "aws", "aws-sd", "azure", "azure-dns", "azure-private-dns", "bluecat", "civo", "cloudflare", "coredns", "designate", "digitalocean", "dnsimple", "dyn", "exoscale", "gandi", "godaddy", "google", "ibmcloud", "inmemory", "linode", "ns1", "oci", "ovh", "pdns", "pihole", "plural", "rcodezero", "rdns", "rfc2136", "safedns", "scaleway", "skydns", "tencentcloud", "transip", "ultradns", "vinyldns", "vultr", "webhook"}
 	app.Flag("provider", "The DNS provider where the DNS records will be created (required, options: "+strings.Join(providers, ", ")+")").Required().PlaceHolder("provider").EnumVar(&cfg.Provider, providers...)
 	app.Flag("domain-filter", "Limit possible target zones by a domain suffix; specify multiple times for multiple domains (optional)").Default("").StringsVar(&cfg.DomainFilter)
 	app.Flag("exclude-domains", "Exclude subdomains (optional)").Default("").StringsVar(&cfg.ExcludeDomains)
@@ -490,6 +469,7 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("alibaba-cloud-zone-type", "When using the Alibaba Cloud provider, filter for zones of this type (optional, options: public, private)").Default(defaultConfig.AlibabaCloudZoneType).EnumVar(&cfg.AlibabaCloudZoneType, "", "public", "private")
 	app.Flag("aws-zone-type", "When using the AWS provider, filter for zones of this type (optional, options: public, private)").Default(defaultConfig.AWSZoneType).EnumVar(&cfg.AWSZoneType, "", "public", "private")
 	app.Flag("aws-zone-tags", "When using the AWS provider, filter for zones with these tags").Default("").StringsVar(&cfg.AWSZoneTagFilter)
+	app.Flag("aws-profile", "When using the AWS provider, name of the profile to use").Default("").StringsVar(&cfg.AWSProfiles)
 	app.Flag("aws-assume-role", "When using the AWS API, assume this IAM role. Useful for hosted zones in another AWS account. Specify the full ARN, e.g. `arn:aws:iam::123455567:role/external-dns` (optional)").Default(defaultConfig.AWSAssumeRole).StringVar(&cfg.AWSAssumeRole)
 	app.Flag("aws-assume-role-external-id", "When using the AWS API and assuming a role then specify this external ID` (optional)").Default(defaultConfig.AWSAssumeRoleExternalID).StringVar(&cfg.AWSAssumeRoleExternalID)
 	app.Flag("aws-batch-change-size", "When using the AWS provider, set the maximum number of changes that will be applied in each batch.").Default(strconv.Itoa(defaultConfig.AWSBatchChangeSize)).IntVar(&cfg.AWSBatchChangeSize)
@@ -528,18 +508,6 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("akamai-access-token", "When using the Akamai provider, specify the access token (required when --provider=akamai and edgerc-path not specified)").Default(defaultConfig.AkamaiAccessToken).StringVar(&cfg.AkamaiAccessToken)
 	app.Flag("akamai-edgerc-path", "When using the Akamai provider, specify the .edgerc file path. Path must be reachable form invocation environment. (required when --provider=akamai and *-token, secret serviceconsumerdomain not specified)").Default(defaultConfig.AkamaiEdgercPath).StringVar(&cfg.AkamaiEdgercPath)
 	app.Flag("akamai-edgerc-section", "When using the Akamai provider, specify the .edgerc file path (Optional when edgerc-path is specified)").Default(defaultConfig.AkamaiEdgercSection).StringVar(&cfg.AkamaiEdgercSection)
-	app.Flag("infoblox-grid-host", "When using the Infoblox provider, specify the Grid Manager host (required when --provider=infoblox)").Default(defaultConfig.InfobloxGridHost).StringVar(&cfg.InfobloxGridHost)
-	app.Flag("infoblox-wapi-port", "When using the Infoblox provider, specify the WAPI port (default: 443)").Default(strconv.Itoa(defaultConfig.InfobloxWapiPort)).IntVar(&cfg.InfobloxWapiPort)
-	app.Flag("infoblox-wapi-username", "When using the Infoblox provider, specify the WAPI username (default: admin)").Default(defaultConfig.InfobloxWapiUsername).StringVar(&cfg.InfobloxWapiUsername)
-	app.Flag("infoblox-wapi-password", "When using the Infoblox provider, specify the WAPI password (required when --provider=infoblox)").Default(defaultConfig.InfobloxWapiPassword).StringVar(&cfg.InfobloxWapiPassword)
-	app.Flag("infoblox-wapi-version", "When using the Infoblox provider, specify the WAPI version (default: 2.3.1)").Default(defaultConfig.InfobloxWapiVersion).StringVar(&cfg.InfobloxWapiVersion)
-	app.Flag("infoblox-ssl-verify", "When using the Infoblox provider, specify whether to verify the SSL certificate (default: true, disable with --no-infoblox-ssl-verify)").Default(strconv.FormatBool(defaultConfig.InfobloxSSLVerify)).BoolVar(&cfg.InfobloxSSLVerify)
-	app.Flag("infoblox-view", "DNS view (default: \"\")").Default(defaultConfig.InfobloxView).StringVar(&cfg.InfobloxView)
-	app.Flag("infoblox-max-results", "Add _max_results as query parameter to the URL on all API requests. The default is 0 which means _max_results is not set and the default of the server is used.").Default(strconv.Itoa(defaultConfig.InfobloxMaxResults)).IntVar(&cfg.InfobloxMaxResults)
-	app.Flag("infoblox-fqdn-regex", "Apply this regular expression as a filter for obtaining zone_auth objects. This is disabled by default.").Default(defaultConfig.InfobloxFQDNRegEx).StringVar(&cfg.InfobloxFQDNRegEx)
-	app.Flag("infoblox-name-regex", "Apply this regular expression as a filter on the name field for obtaining infoblox records. This is disabled by default.").Default(defaultConfig.InfobloxNameRegEx).StringVar(&cfg.InfobloxNameRegEx)
-	app.Flag("infoblox-create-ptr", "When using the Infoblox provider, create a ptr entry in addition to an entry").Default(strconv.FormatBool(defaultConfig.InfobloxCreatePTR)).BoolVar(&cfg.InfobloxCreatePTR)
-	app.Flag("infoblox-cache-duration", "When using the Infoblox provider, set the record TTL (0s to disable).").Default(strconv.Itoa(defaultConfig.InfobloxCacheDuration)).IntVar(&cfg.InfobloxCacheDuration)
 	app.Flag("dyn-customer-name", "When using the Dyn provider, specify the Customer Name").Default("").StringVar(&cfg.DynCustomerName)
 	app.Flag("dyn-username", "When using the Dyn provider, specify the Username").Default("").StringVar(&cfg.DynUsername)
 	app.Flag("dyn-password", "When using the Dyn provider, specify the password").Default("").StringVar(&cfg.DynPassword)
@@ -638,11 +606,11 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("log-level", "Set the level of logging. (default: info, options: panic, debug, info, warning, error, fatal)").Default(defaultConfig.LogLevel).EnumVar(&cfg.LogLevel, allLogLevelsAsStrings()...)
 
 	// Webhook provider
-	app.Flag("webhook-provider-url", "[EXPERIMENTAL] The URL of the remote endpoint to call for the webhook provider (default: http://localhost:8888)").Default(defaultConfig.WebhookProviderURL).StringVar(&cfg.WebhookProviderURL)
-	app.Flag("webhook-provider-read-timeout", "[EXPERIMENTAL] The read timeout for the webhook provider in duration format (default: 5s)").Default(defaultConfig.WebhookProviderReadTimeout.String()).DurationVar(&cfg.WebhookProviderReadTimeout)
-	app.Flag("webhook-provider-write-timeout", "[EXPERIMENTAL] The write timeout for the webhook provider in duration format (default: 10s)").Default(defaultConfig.WebhookProviderWriteTimeout.String()).DurationVar(&cfg.WebhookProviderWriteTimeout)
+	app.Flag("webhook-provider-url", "The URL of the remote endpoint to call for the webhook provider (default: http://localhost:8888)").Default(defaultConfig.WebhookProviderURL).StringVar(&cfg.WebhookProviderURL)
+	app.Flag("webhook-provider-read-timeout", "The read timeout for the webhook provider in duration format (default: 5s)").Default(defaultConfig.WebhookProviderReadTimeout.String()).DurationVar(&cfg.WebhookProviderReadTimeout)
+	app.Flag("webhook-provider-write-timeout", "The write timeout for the webhook provider in duration format (default: 10s)").Default(defaultConfig.WebhookProviderWriteTimeout.String()).DurationVar(&cfg.WebhookProviderWriteTimeout)
 
-	app.Flag("webhook-server", "[EXPERIMENTAL] When enabled, runs as a webhook server instead of a controller. (default: false).").BoolVar(&cfg.WebhookServer)
+	app.Flag("webhook-server", "When enabled, runs as a webhook server instead of a controller. (default: false).").BoolVar(&cfg.WebhookServer)
 
 	_, err := app.Parse(args)
 	if err != nil {

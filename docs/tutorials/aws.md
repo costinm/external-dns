@@ -1,6 +1,6 @@
 # Setting up ExternalDNS for Services on AWS
 
-This tutorial describes how to setup ExternalDNS for usage within a Kubernetes cluster on AWS. Make sure to use **>=0.11.0** version of ExternalDNS for this tutorial
+This tutorial describes how to setup ExternalDNS for usage within a Kubernetes cluster on AWS. Make sure to use **>=0.15.0** version of ExternalDNS for this tutorial
 
 ## IAM Policy
 
@@ -232,6 +232,14 @@ kubectl create secret generic external-dns \
 
 Follow the steps under [Deploy ExternalDNS](#deploy-externaldns) using either RBAC or non-RBAC.  Make sure to uncomment the section that mounts volumes, so that the credentials can be mounted.
 
+> [!TIP]
+> By default ExternalDNS takes the profile named `default` from the credentials file. If you want to use a different 
+> profile, you can set the environment variable `EXTERNAL_DNS_AWS_PROFILE` to the desired profile name or use the 
+> `--aws-profile` command line argument. It is even possible to use more than one profile at ones, separated by space in
+> the environment variable `EXTERNAL_DNS_AWS_PROFILE` or by using `--aws-profile` multiple times. In this case 
+> ExternalDNS looks for the hosted zones in all profiles and keeps maintaining a mapping table between zone and profile 
+> in order to be able to modify the zones in the correct profile.
+
 ### IAM Roles for Service Accounts
 
 [IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) ([IAM roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) allows cluster operators to map AWS IAM Roles to Kubernetes Service Accounts.  This essentially allows only ExternalDNS pods to access Route53 without exposing any static credentials.
@@ -392,6 +400,24 @@ kubectl get namespaces | grep -q $EXTERNALDNS_NS || \
   kubectl create namespace $EXTERNALDNS_NS
 ```
 
+## Using Helm (with OIDC)
+
+Create a values.yaml file to configure ExternalDNS:
+
+```shell
+provider:
+  name: aws
+env:
+  - name: AWS_DEFAULT_REGION
+    value: us-east-1 # change to region where EKS is installed
+```
+
+Finally, install the ExternalDNS chart with Helm using the configuration specified in your values.yaml file:
+
+```shell
+helm upgrade --install external-dns external-dns/external-dns --values values.yaml
+```
+
 ### Manifest (for clusters without RBAC enabled)
 
 Save the following below as `externaldns-no-rbac.yaml`.
@@ -416,7 +442,7 @@ spec:
     spec:
       containers:
         - name: external-dns
-          image: registry.k8s.io/external-dns/external-dns:v0.14.1
+          image: registry.k8s.io/external-dns/external-dns:v0.14.2
           args:
             - --source=service
             - --source=ingress
@@ -511,7 +537,7 @@ spec:
       serviceAccountName: external-dns
       containers:
         - name: external-dns
-          image: registry.k8s.io/external-dns/external-dns:v0.14.1
+          image: registry.k8s.io/external-dns/external-dns:v0.14.2
           args:
             - --source=service
             - --source=ingress
@@ -852,7 +878,7 @@ Note: ExternalDNS does not support creating healthchecks, and assumes that `<hea
 
 When creating ALIAS type records in Route53 it is required that external-dns be aware of the canonical hosted zone in which
 the specified hostname is created. External-dns is able to automatically identify the canonical hosted zone for many
-hostnames based upon known hostname suffixes which are defined in [aws.go](../../provider/aws/aws.go). If a hostname
+hostnames based upon known hostname suffixes which are defined in [aws.go](https://github.com/kubernetes-sigs/external-dns/blob/master/provider/aws/aws.go#L65). If a hostname
 does not have a known suffix then the suffix can be added into `aws.go` or the [target-hosted-zone annotation](#target-hosted-zone)
 can be used to manually define the ID of the canonical hosted zone.
 
@@ -977,7 +1003,7 @@ A simple way to implement randomised startup is with an init container:
     spec:
       initContainers:
       - name: init-jitter
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         command:
         - /bin/sh
         - -c

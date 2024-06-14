@@ -26,7 +26,6 @@ import (
 	"time"
 
 	awsSDK "github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/route53"
 	sd "github.com/aws/aws-sdk-go/service/servicediscovery"
@@ -61,7 +60,6 @@ import (
 	"sigs.k8s.io/external-dns/provider/godaddy"
 	"sigs.k8s.io/external-dns/provider/google"
 	"sigs.k8s.io/external-dns/provider/ibmcloud"
-	"sigs.k8s.io/external-dns/provider/infoblox"
 	"sigs.k8s.io/external-dns/provider/inmemory"
 	"sigs.k8s.io/external-dns/provider/linode"
 	"sigs.k8s.io/external-dns/provider/ns1"
@@ -195,20 +193,6 @@ func main() {
 	zoneTypeFilter := provider.NewZoneTypeFilter(cfg.AWSZoneType)
 	zoneTagFilter := provider.NewZoneTagFilter(cfg.AWSZoneTagFilter)
 
-	var awsSession *session.Session
-	if cfg.Provider == "aws" || cfg.Provider == "aws-sd" || cfg.Registry == "dynamodb" {
-		awsSession, err = aws.NewSession(
-			aws.AWSSessionConfig{
-				AssumeRole:           cfg.AWSAssumeRole,
-				AssumeRoleExternalID: cfg.AWSAssumeRoleExternalID,
-				APIRetries:           cfg.AWSAPIRetries,
-			},
-		)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
 	var p provider.Provider
 	switch cfg.Provider {
 	case "akamai":
@@ -227,6 +211,12 @@ func main() {
 	case "alibabacloud":
 		p, err = alibabacloud.NewAlibabaCloudProvider(cfg.AlibabaCloudConfigFile, domainFilter, zoneIDFilter, cfg.AlibabaCloudZoneType, cfg.DryRun)
 	case "aws":
+		sessions := aws.CreateSessions(cfg)
+		clients := make(map[string]aws.Route53API, len(sessions))
+		for profile, session := range sessions {
+			clients[profile] = route53.New(session)
+		}
+
 		p, err = aws.NewAWSProvider(
 			aws.AWSConfig{
 				DomainFilter:          domainFilter,
@@ -243,7 +233,7 @@ func main() {
 				DryRun:                cfg.DryRun,
 				ZoneCacheDuration:     cfg.AWSZoneCacheDuration,
 			},
-			route53.New(awsSession),
+			clients,
 		)
 	case "aws-sd":
 		// Check that only compatible Registry is used with AWS-SD
@@ -251,11 +241,11 @@ func main() {
 			log.Infof("Registry \"%s\" cannot be used with AWS Cloud Map. Switching to \"aws-sd\".", cfg.Registry)
 			cfg.Registry = "aws-sd"
 		}
-		p, err = awssd.NewAWSSDProvider(domainFilter, cfg.AWSZoneType, cfg.DryRun, cfg.AWSSDServiceCleanup, cfg.TXTOwnerID, sd.New(awsSession))
+		p, err = awssd.NewAWSSDProvider(domainFilter, cfg.AWSZoneType, cfg.DryRun, cfg.AWSSDServiceCleanup, cfg.TXTOwnerID, sd.New(aws.CreateDefaultSession(cfg)))
 	case "azure-dns", "azure":
-		p, err = azure.NewAzureProvider(cfg.AzureConfigFile, domainFilter, zoneNameFilter, zoneIDFilter, cfg.AzureSubscriptionID, cfg.AzureResourceGroup, cfg.AzureUserAssignedIdentityClientID, cfg.DryRun)
+		p, err = azure.NewAzureProvider(cfg.AzureConfigFile, domainFilter, zoneNameFilter, zoneIDFilter, cfg.AzureSubscriptionID, cfg.AzureResourceGroup, cfg.AzureUserAssignedIdentityClientID, cfg.AzureActiveDirectoryAuthorityHost, cfg.DryRun)
 	case "azure-private-dns":
-		p, err = azure.NewAzurePrivateDNSProvider(cfg.AzureConfigFile, domainFilter, zoneIDFilter, cfg.AzureSubscriptionID, cfg.AzureResourceGroup, cfg.AzureUserAssignedIdentityClientID, cfg.DryRun)
+		p, err = azure.NewAzurePrivateDNSProvider(cfg.AzureConfigFile, domainFilter, zoneNameFilter, zoneIDFilter, cfg.AzureSubscriptionID, cfg.AzureResourceGroup, cfg.AzureUserAssignedIdentityClientID, cfg.AzureActiveDirectoryAuthorityHost, cfg.DryRun)
 	case "bluecat":
 		p, err = bluecat.NewBluecatProvider(cfg.BluecatConfigFile, cfg.BluecatDNSConfiguration, cfg.BluecatDNSServerName, cfg.BluecatDNSDeployType, cfg.BluecatDNSView, cfg.BluecatGatewayHost, cfg.BluecatRootZone, cfg.TXTPrefix, cfg.TXTSuffix, domainFilter, zoneIDFilter, cfg.DryRun, cfg.BluecatSkipTLSVerify)
 	case "vinyldns":
@@ -280,26 +270,6 @@ func main() {
 		p, err = linode.NewLinodeProvider(domainFilter, cfg.DryRun, externaldns.Version)
 	case "dnsimple":
 		p, err = dnsimple.NewDnsimpleProvider(domainFilter, zoneIDFilter, cfg.DryRun)
-	case "infoblox":
-		p, err = infoblox.NewInfobloxProvider(
-			infoblox.StartupConfig{
-				DomainFilter:  domainFilter,
-				ZoneIDFilter:  zoneIDFilter,
-				Host:          cfg.InfobloxGridHost,
-				Port:          cfg.InfobloxWapiPort,
-				Username:      cfg.InfobloxWapiUsername,
-				Password:      cfg.InfobloxWapiPassword,
-				Version:       cfg.InfobloxWapiVersion,
-				SSLVerify:     cfg.InfobloxSSLVerify,
-				View:          cfg.InfobloxView,
-				MaxResults:    cfg.InfobloxMaxResults,
-				DryRun:        cfg.DryRun,
-				FQDNRegEx:     cfg.InfobloxFQDNRegEx,
-				NameRegEx:     cfg.InfobloxNameRegEx,
-				CreatePTR:     cfg.InfobloxCreatePTR,
-				CacheDuration: cfg.InfobloxCacheDuration,
-			},
-		)
 	case "dyn":
 		p, err = dyn.NewDynProvider(
 			dyn.DynConfig{
@@ -439,7 +409,7 @@ func main() {
 		if cfg.AWSDynamoDBRegion != "" {
 			config = config.WithRegion(cfg.AWSDynamoDBRegion)
 		}
-		r, err = registry.NewDynamoDBRegistry(p, cfg.TXTOwnerID, dynamodb.New(awsSession, config), cfg.AWSDynamoDBTable, cfg.TXTPrefix, cfg.TXTSuffix, cfg.TXTWildcardReplacement, cfg.ManagedDNSRecordTypes, cfg.ExcludeDNSRecordTypes, []byte(cfg.TXTEncryptAESKey), cfg.TXTCacheInterval)
+		r, err = registry.NewDynamoDBRegistry(p, cfg.TXTOwnerID, dynamodb.New(aws.CreateDefaultSession(cfg), config), cfg.AWSDynamoDBTable, cfg.TXTPrefix, cfg.TXTSuffix, cfg.TXTWildcardReplacement, cfg.ManagedDNSRecordTypes, cfg.ExcludeDNSRecordTypes, []byte(cfg.TXTEncryptAESKey), cfg.TXTCacheInterval)
 	case "noop":
 		r, err = registry.NewNoopRegistry(p)
 	case "txt":

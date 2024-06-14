@@ -15,6 +15,10 @@ hide:
 
 ExternalDNS synchronizes exposed Kubernetes Services and Ingresses with DNS providers.
 
+## Documentation
+
+This README is a part of the complete documentation, available [here](https://kubernetes-sigs.github.io/external-dns/).
+
 ## What It Does
 
 Inspired by [Kubernetes DNS](https://github.com/kubernetes/dns), Kubernetes' cluster-internal DNS server, ExternalDNS makes Kubernetes resources discoverable via public DNS servers. Like KubeDNS, it retrieves a list of resources (Services, Ingresses, etc.) from the [Kubernetes API](https://kubernetes.io/docs/api/) to determine a desired list of DNS records. *Unlike* KubeDNS, however, it's not a DNS server itself, but merely configures other DNS providers accordingly—e.g. [AWS Route 53](https://aws.amazon.com/route53/) or [Google Cloud DNS](https://cloud.google.com/dns/docs/).
@@ -38,7 +42,6 @@ ExternalDNS allows you to keep selected zones (via `--domain-filter`) synchroniz
 * [RcodeZero](https://www.rcodezero.at/)
 * [DigitalOcean](https://www.digitalocean.com/products/networking)
 * [DNSimple](https://dnsimple.com/)
-* [Infoblox](https://www.infoblox.com/products/dns/)
 * [Dyn](https://dyn.com/dns/)
 * [OpenStack Designate](https://docs.openstack.org/designate/latest/)
 * [PowerDNS](https://www.powerdns.com/)
@@ -80,13 +83,16 @@ Known providers using webhooks:
 | Provider |  Repo |
 | -------- | ----------- |
 | Adguard Home Provider | https://github.com/muhlba91/external-dns-provider-adguard |
+| Anexia | https://github.com/ProbstenHias/external-dns-anexia-webhook |
 | Bizfly Cloud | https://github.com/bizflycloud/external-dns-bizflycloud-webhook |
 | Gcore | https://github.com/G-Core/external-dns-gcore-webhook |
 | GleSYS | https://github.com/glesys/external-dns-glesys |
 | Hetzner | https://github.com/mconfalonieri/external-dns-hetzner-webhook |
 | IONOS | https://github.com/ionos-cloud/external-dns-ionos-webhook |
+| Infoblox | https://github.com/AbsaOSS/external-dns-infoblox-webhook |
 | Netcup | https://github.com/mrueg/external-dns-netcup-webhook |
 | STACKIT | https://github.com/stackitcloud/external-dns-stackit-webhook |
+| Unifi | https://github.com/kashalls/external-dns-unifi-webhook |
 
 ## Status of in-tree providers
 
@@ -115,7 +121,6 @@ The following table clarifies the current status of the providers according to t
 | RcodeZero | Alpha | |
 | DigitalOcean | Alpha | |
 | DNSimple | Alpha | |
-| Infoblox | Alpha | @saileshgiri |
 | Dyn | Alpha | |
 | OpenStack Designate | Alpha | |
 | PowerDNS | Alpha | |
@@ -184,7 +189,6 @@ The following tutorials are provided:
 	* [Using Google's Default Ingress Controller](docs/tutorials/gke.md)
 	* [Using the Nginx Ingress Controller](docs/tutorials/nginx-ingress.md)
 * [Headless Services](docs/tutorials/hostport.md)
-* [Infoblox](docs/tutorials/infoblox.md)
 * [Istio Gateway Source](docs/tutorials/istio.md)
 * [Kubernetes Security Context](docs/tutorials/security-context.md)
 * [Linode](docs/tutorials/linode.md)
@@ -206,7 +210,7 @@ The following tutorials are provided:
 * [UltraDNS](docs/tutorials/ultradns.md)
 * [GoDaddy](docs/tutorials/godaddy.md)
 * [Gandi](docs/tutorials/gandi.md)
-* [SafeDNS](docs/tutorials/UKFast_SafeDNS.md)
+* [SafeDNS](docs/tutorials/ANS_Group_SafeDNS.md)
 * [IBM Cloud](docs/tutorials/ibmcloud.md)
 * [Nodes as source](docs/tutorials/nodes.md)
 * [TencentCloud](docs/tutorials/tencentcloud.md)
@@ -278,7 +282,7 @@ Now you can experiment and watch how ExternalDNS makes sure that your DNS record
 * Add another Service to create more DNS records.
 * Remove Services to clean up your managed zone.
 
-The [tutorials](docs/tutorials) section contains examples, including Ingress resources, and shows you how to set up ExternalDNS in different environments such as other cloud providers and alternative Ingress controllers.
+The **tutorials** section contains examples, including Ingress resources, and shows you how to set up ExternalDNS in different environments such as other cloud providers and alternative Ingress controllers.
 
 # Note
 

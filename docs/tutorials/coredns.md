@@ -86,6 +86,7 @@ helm install --name my-coredns --values values.yaml stable/coredns
 ## Installing ExternalDNS
 ### Install external ExternalDNS
 ETCD_URLS is configured to etcd client service address.
+Optionally, you can configure ETCD_USERNAME and ETCD_PASSWORD for authenticating to etcd. It is also possible to connect to the etcd cluster via HTTPS using the following environment variables: ETCD_CA_FILE, ETCD_CERT_FILE, ETCD_KEY_FILE, ETCD_TLS_SERVER_NAME, ETCD_TLS_INSECURE.
 
 #### Manifest (for clusters without RBAC enabled)
 
@@ -108,7 +109,7 @@ spec:
     spec:
       containers:
       - name: external-dns
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         args:
         - --source=ingress
         - --provider=coredns
@@ -175,7 +176,7 @@ spec:
       serviceAccountName: external-dns
       containers:
       - name: external-dns
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         args:
         - --source=ingress
         - --provider=coredns

@@ -365,6 +365,7 @@ type DNSEndpointStatus struct {
 // +kubebuilder:resource:path=dnsendpoints
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:metadata:annotations="api-approved.kubernetes.io=https://github.com/kubernetes-sigs/external-dns/pull/2007"
 // +versionName=v1alpha1
 
 type DNSEndpoint struct {
@@ -381,4 +382,25 @@ type DNSEndpointList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DNSEndpoint `json:"items"`
+}
+
+// RemoveDuplicates returns a slice holding the unique endpoints.
+// This function doesn't contemplate the Targets of an Endpoint
+// as part of the primary Key
+func RemoveDuplicates(endpoints []*Endpoint) []*Endpoint {
+	visited := make(map[EndpointKey]struct{})
+	result := []*Endpoint{}
+
+	for _, ep := range endpoints {
+		key := ep.Key()
+
+		if _, found := visited[key]; !found {
+			result = append(result, ep)
+			visited[key] = struct{}{}
+		} else {
+			log.Debugf(`Skipping duplicated endpoint: %v`, ep)
+		}
+	}
+
+	return result
 }

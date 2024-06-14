@@ -1,6 +1,6 @@
 # external-dns
 
-![Version: 1.14.4](https://img.shields.io/badge/Version-1.14.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.14.1](https://img.shields.io/badge/AppVersion-0.14.1-informational?style=flat-square)
+![Version: 1.14.5](https://img.shields.io/badge/Version-1.14.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.14.2](https://img.shields.io/badge/AppVersion-0.14.2-informational?style=flat-square)
 
 ExternalDNS synchronizes exposed Kubernetes Services and Ingresses with DNS providers.
 
@@ -27,7 +27,7 @@ helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/
 After you've installed the repo you can install the chart.
 
 ```shell
-helm upgrade --install external-dns external-dns/external-dns --version 1.14.4
+helm upgrade --install external-dns external-dns/external-dns --version 1.14.5
 ```
 
 ## Providers
@@ -40,6 +40,19 @@ See [documentation](https://kubernetes-sigs.github.io/external-dns/#new-provider
 | Provider               | Supported  |
 |------------------------|------------|
 | `webhook`              | ✅         |
+
+### Other Providers
+
+For set up for a specific provider using the Helm chart, see the following links:
+
+- [AWS](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/aws.md#using-helm-with-oidc)
+- [akamai-edgedns](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/akamai-edgedns.md#using-helm)
+- [cloudflare](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/cloudflare.md#using-helm)
+- [digitalocean](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/digitalocean.md#using-helm)
+- [godaddy](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/godaddy.md#using-helm)
+- [ns1](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/ns1.md#using-helm)
+- [plural](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/plural.md#using-helm)
+- [vultr](https://github.com/kubernetes-sigs/external-dns/blob/master/docs/tutorials/vultr.md#using-helm)
 
 ## Namespaced Scoped Installation
 
@@ -89,6 +102,7 @@ If `namespaced` is set to `true`, please ensure that `sources` my only contains 
 | env | list | `[]` | [Environment variables](https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/) for the `external-dns` container. |
 | excludeDomains | list | `[]` |  |
 | extraArgs | list | `[]` | Extra arguments to provide to _ExternalDNS_. |
+| extraContainers | object | `{}` | Extra containers to add to the `Deployment`. |
 | extraVolumeMounts | list | `[]` | Extra [volume mounts](https://kubernetes.io/docs/concepts/storage/volumes/) for the `external-dns` container. |
 | extraVolumes | list | `[]` | Extra [volumes](https://kubernetes.io/docs/concepts/storage/volumes/) for the `Pod`. |
 | fullnameOverride | string | `nil` | Override the full name of the chart. |

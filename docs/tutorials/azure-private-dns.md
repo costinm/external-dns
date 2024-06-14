@@ -130,7 +130,7 @@ spec:
     spec:
       containers:
       - name: externaldns
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         args:
         - --source=service
         - --source=ingress
@@ -201,7 +201,7 @@ spec:
       serviceAccountName: externaldns
       containers:
       - name: externaldns
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         args:
         - --source=service
         - --source=ingress
@@ -272,7 +272,7 @@ spec:
       serviceAccountName: externaldns
       containers:
       - name: externaldns
-        image: registry.k8s.io/external-dns/external-dns:v0.14.1
+        image: registry.k8s.io/external-dns/external-dns:v0.14.2
         args:
         - --source=service
         - --source=ingress
@@ -430,7 +430,13 @@ spec:
         pathType: Prefix
 ```
 
-When using ExternalDNS with ingress objects it will automatically create DNS records based on host names specified in ingress objects that match the domain-filter argument in the externaldns deployment manifest. When those host names are removed or renamed the corresponding DNS records are also altered.
+When you use ExternalDNS with Ingress resources, it automatically creates DNS records based on the hostnames listed in those Ingress objects.
+Those hostnames must match the filters that you defined (if any):
+
+- By default, `--domain-filter` filters Azure Private DNS zone.
+- If you use `--domain-filter` together with `--zone-name-filter`, the behavior changes: `--domain-filter` then filters Ingress domains, not the Azure Private DNS zone name.
+
+When those hostnames are removed or renamed the corresponding DNS records are also altered.
 
 Create the deployment, service and ingress object:
 
