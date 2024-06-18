@@ -361,19 +361,21 @@ func BuildWithConfig(ctx context.Context, source string, p ClientGenerator, cfg 
 	return nil, ErrSourceNotFound
 }
 
+var InstrumentationWrapper = func(rt http.RoundTripper) http.RoundTripper {
+	return instrumented_http.NewTransport(rt, &instrumented_http.Callbacks{
+		PathProcessor: func(path string) string {
+			parts := strings.Split(path, "/")
+			return parts[len(parts)-1]
+		},
+	})
+}
+
 func instrumentedRESTConfig(kubeConfig, apiServerURL string, requestTimeout time.Duration) (*rest.Config, error) {
 	config, err := GetRestConfig(kubeConfig, apiServerURL)
 	if err != nil {
 		return nil, err
 	}
-	config.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
-		return instrumented_http.NewTransport(rt, &instrumented_http.Callbacks{
-			PathProcessor: func(path string) string {
-				parts := strings.Split(path, "/")
-				return parts[len(parts)-1]
-			},
-		})
-	}
+	config.WrapTransport = InstrumentationWrapper
 	config.Timeout = requestTimeout
 	return config, nil
 }

@@ -210,7 +210,7 @@ func NewGoogleDNSClient(ctx context.Context) (*dns.Service, error){
 
 // NewGoogleZoneProvider returns a GoogleProvider tied to a specific zone. It will not list the zones, and use the
 // zone domain as a filter.
-func NewGoogleZoneProvider(ctx context.Context, dnss *dns.Service, project, zone, domain string) (*GoogleProvider, error) {
+func NewGoogleZoneProvider(ctx context.Context, dnsClient *dns.Service, project, zone, domain string) (*GoogleProvider, error) {
 	if project == "" {
 		project = os.Getenv("PROJECT_ID")
 	}
@@ -233,9 +233,9 @@ func NewGoogleZoneProvider(ctx context.Context, dnss *dns.Service, project, zone
 		//BatchChangeInterval:      batchChangeInterval,
 		//domainFilter:             domainFilter,
 		//zoneIDFilter:             zoneIDFilter,
-		//resourceRecordSetsClient: resourceRecordSetsService{dnsClient.ResourceRecordSets},
-		//managedZonesClient:       managedZonesService{dnsClient.ManagedZones},
-		//changesClient:            changesService{dnsClient.Changes},
+		resourceRecordSetsClient: resourceRecordSetsService{dnsClient.ResourceRecordSets},
+		managedZonesClient:       managedZonesService{dnsClient.ManagedZones},
+		changesClient:            changesService{dnsClient.Changes},
 		ctx:                      ctx,
 	}
 
@@ -246,6 +246,10 @@ func NewGoogleZoneProvider(ctx context.Context, dnss *dns.Service, project, zone
 // to limit the results.
 func (p *GoogleProvider) Zones(ctx context.Context) (map[string]*dns.ManagedZone, error) {
 	zones := make(map[string]*dns.ManagedZone)
+
+	// GKE zones are named gke-CLUSTERNAME-HASH-dns
+	// Description is like "Private zone for GKE cluster "CLUSTER_NAME" with cluster suffix "cluster.local." in project "PROJECT_ID" with scope "CLUSTER_SCOPE
+	// They have PrivateVisibilityConfig set to GkeCluster with the full cluster name included.
 
 	f := func(resp *dns.ManagedZonesListResponse) error {
 		for _, zone := range resp.ManagedZones {
@@ -289,6 +293,7 @@ func (p *GoogleProvider) Records(ctx context.Context) (endpoints []*endpoint.End
 			if !p.SupportedRecordType(r.Type) {
 				continue
 			}
+			// May also include Singatures
 			endpoints = append(endpoints, endpoint.NewEndpointWithTTL(r.Name, r.Type, endpoint.TTL(r.Ttl), r.Rrdatas...))
 		}
 
