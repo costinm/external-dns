@@ -2,6 +2,10 @@ module sigs.k8s.io/external-dns
 
 go 1.22.4
 
+replace (
+	sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
+)
+
 require (
 	cloud.google.com/go/compute/metadata v0.3.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.12.0

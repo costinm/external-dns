@@ -649,7 +649,7 @@ func validateChangeRecord(t *testing.T, record *dns.ResourceRecordSet, expected 
 
 func newGoogleProviderZoneOverlap(t *testing.T, domainFilter endpoint.DomainFilter, zoneIDFilter provider.ZoneIDFilter, zoneTypeFilter provider.ZoneTypeFilter, dryRun bool, records []*endpoint.Endpoint) *GoogleProvider {
 	provider := &GoogleProvider{
-		project:                  "zalando-external-dns-test",
+		Project:                  "zalando-external-dns-test",
 		dryRun:                   false,
 		domainFilter:             domainFilter,
 		zoneIDFilter:             zoneIDFilter,
@@ -717,7 +717,7 @@ func newGoogleProviderZoneOverlap(t *testing.T, domainFilter endpoint.DomainFilt
 
 func newGoogleProvider(t *testing.T, domainFilter endpoint.DomainFilter, zoneIDFilter provider.ZoneIDFilter, dryRun bool, records []*endpoint.Endpoint) *GoogleProvider {
 	provider := &GoogleProvider{
-		project:                  "zalando-external-dns-test",
+		Project:                  "zalando-external-dns-test",
 		dryRun:                   false,
 		domainFilter:             domainFilter,
 		zoneIDFilter:             zoneIDFilter,
@@ -787,7 +787,7 @@ func setupGoogleRecords(t *testing.T, provider *GoogleProvider, endpoints []*end
 
 func clearGoogleRecords(t *testing.T, provider *GoogleProvider, zone string) {
 	recordSets := []*dns.ResourceRecordSet{}
-	require.NoError(t, provider.resourceRecordSetsClient.List(provider.project, zone).Pages(context.Background(), func(resp *dns.ResourceRecordSetsListResponse) error {
+	require.NoError(t, provider.resourceRecordSetsClient.List(provider.Project, zone).Pages(context.Background(), func(resp *dns.ResourceRecordSetsListResponse) error {
 		for _, r := range resp.Rrsets {
 			switch r.Type {
 			case endpoint.RecordTypeA, endpoint.RecordTypeCNAME:
@@ -798,7 +798,7 @@ func clearGoogleRecords(t *testing.T, provider *GoogleProvider, zone string) {
 	}))
 
 	if len(recordSets) != 0 {
-		_, err := provider.changesClient.Create(provider.project, zone, &dns.Change{
+		_, err := provider.changesClient.Create(provider.Project, zone, &dns.Change{
 			Deletions: recordSets,
 		}).Do()
 		require.NoError(t, err)

@@ -53,6 +53,19 @@ type InMemoryProvider struct {
 	OnRecords      func()
 }
 
+// InMemoryConfig is the configuration for the InMemoryProvider as a json or yaml struct.
+// Unlike options, it is better suited for serialization and deserialization and CRDs
+type InMemoryConfig struct {
+	Zones map[string] *Zone
+}
+
+type Zone struct {
+	Name string
+	Domain string
+
+	Records []*endpoint.Endpoint
+}
+
 // InMemoryOption allows to extend in-memory provider
 type InMemoryOption func(*InMemoryProvider)
 

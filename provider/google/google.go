@@ -19,6 +19,7 @@ package google
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -100,37 +101,99 @@ func (c changesService) Create(project string, managedZone string, change *dns.C
 // GoogleProvider is an implementation of Provider for Google CloudDNS.
 type GoogleProvider struct {
 	provider.BaseProvider
-	// The Google project to work in
-	project string
+	// The Google Project to work in
+	Project string
+
+	// The zone to use
+	Zone string
+	
 	// Enabled dry-run will print any modifying actions rather than execute them.
 	dryRun bool
+	
 	// Max batch size to submit to Google Cloud DNS per transaction.
-	batchChangeSize int
+	BatchChangeSize int
 	// Interval between batch updates.
-	batchChangeInterval time.Duration
+	BatchChangeInterval time.Duration
+
 	// only consider hosted zones managing domains ending in this suffix
 	domainFilter endpoint.DomainFilter
 	// filter for zones based on visibility
 	zoneTypeFilter provider.ZoneTypeFilter
 	// only consider hosted zones ending with this zone id
 	zoneIDFilter provider.ZoneIDFilter
+
 	// A client for managing resource record sets
 	resourceRecordSetsClient resourceRecordSetsClientInterface
 	// A client for managing hosted zones
 	managedZonesClient managedZonesServiceInterface
 	// A client for managing change sets
 	changesClient changesServiceInterface
+
 	// The context parameter to be passed for gcloud API calls.
 	ctx context.Context
 }
 
 // NewGoogleProvider initializes a new Google CloudDNS based Provider.
+// Will default from environment variables and may use Metadata server
+//
+// Order:
+// - GOOGLE_APPLICATION_CREDENTIALS
+// - well known location ~/.config/gcloud/application_default_credentials.json
+// - metadata.OnGCE
+//     - checks of GCE_METADATA_HOST is set
+//     - checks if http://169.254.169.254/ returns Metadata-Flavor=Google or lookup metadata.google.internal. works
+//
+// Env variables used for config:
+// PROJECT_ID - google project ID to use
+// ZONE - use a specific zone. If not specified (or passed via CLI) - will list zones.
+//
 func NewGoogleProvider(ctx context.Context, project string, domainFilter endpoint.DomainFilter, zoneIDFilter provider.ZoneIDFilter, batchChangeSize int, batchChangeInterval time.Duration, zoneVisibility string, dryRun bool) (*GoogleProvider, error) {
-	gcloud, err := google.DefaultClient(ctx, dns.NdevClouddnsReadwriteScope)
+	dnsClient, err := NewGoogleDNSClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	if project == "" {
+		project = os.Getenv("PROJECT_ID")
+	}
+	if project == "" {
+		project = os.Getenv("GOOGLE_PROJECT_ID")
+	}
+	if project == "" {
+		mProject, mErr := metadata.ProjectID()
+		if mErr != nil {
+			return nil, fmt.Errorf("failed to auto-detect the project id: %w", mErr)
+		}
+		log.Infof("Google project auto-detected: %s", mProject)
+		project = mProject
+	}
+
+	gprovider := &GoogleProvider{
+		Project:                  project,
+		dryRun:                   dryRun,
+		BatchChangeSize:          batchChangeSize,
+		BatchChangeInterval:      batchChangeInterval,
+		domainFilter:             domainFilter,
+		zoneIDFilter:             zoneIDFilter,
+		resourceRecordSetsClient: resourceRecordSetsService{dnsClient.ResourceRecordSets},
+		managedZonesClient:       managedZonesService{dnsClient.ManagedZones},
+		changesClient:            changesService{dnsClient.Changes},
+		ctx:                      ctx,
+	}
+
+	if zoneVisibility != "" {
+		gprovider.zoneTypeFilter = provider.NewZoneTypeFilter(zoneVisibility)
+	}
+
+	return gprovider, nil
+}
+
+func NewGoogleDNSClient(ctx context.Context) (*dns.Service, error){
+	gcloud, err := google.DefaultClient(ctx, dns.NdevClouddnsReadwriteScope)
+	if err != nil {
+		return nil, err
+	}
+	// This is used by external_dns for prometheus.
 	gcloud = instrumented_http.NewClient(gcloud, &instrumented_http.Callbacks{
 		PathProcessor: func(path string) string {
 			parts := strings.Split(path, "/")
@@ -142,7 +205,18 @@ func NewGoogleProvider(ctx context.Context, project string, domainFilter endpoin
 	if err != nil {
 		return nil, err
 	}
+	return dnsClient, nil
+}
 
+// NewGoogleZoneProvider returns a GoogleProvider tied to a specific zone. It will not list the zones, and use the
+// zone domain as a filter.
+func NewGoogleZoneProvider(ctx context.Context, dnss *dns.Service, project, zone, domain string) (*GoogleProvider, error) {
+	if project == "" {
+		project = os.Getenv("PROJECT_ID")
+	}
+	if project == "" {
+		project = os.Getenv("GOOGLE_PROJECT_ID")
+	}
 	if project == "" {
 		mProject, mErr := metadata.ProjectID()
 		if mErr != nil {
@@ -152,26 +226,24 @@ func NewGoogleProvider(ctx context.Context, project string, domainFilter endpoin
 		project = mProject
 	}
 
-	zoneTypeFilter := provider.NewZoneTypeFilter(zoneVisibility)
-
-	provider := &GoogleProvider{
-		project:                  project,
-		dryRun:                   dryRun,
-		batchChangeSize:          batchChangeSize,
-		batchChangeInterval:      batchChangeInterval,
-		domainFilter:             domainFilter,
-		zoneTypeFilter:           zoneTypeFilter,
-		zoneIDFilter:             zoneIDFilter,
-		resourceRecordSetsClient: resourceRecordSetsService{dnsClient.ResourceRecordSets},
-		managedZonesClient:       managedZonesService{dnsClient.ManagedZones},
-		changesClient:            changesService{dnsClient.Changes},
+	gprovider := &GoogleProvider{
+		Project:                  project,
+		//dryRun:                   dryRun,
+		//BatchChangeSize:          batchChangeSize,
+		//BatchChangeInterval:      batchChangeInterval,
+		//domainFilter:             domainFilter,
+		//zoneIDFilter:             zoneIDFilter,
+		//resourceRecordSetsClient: resourceRecordSetsService{dnsClient.ResourceRecordSets},
+		//managedZonesClient:       managedZonesService{dnsClient.ManagedZones},
+		//changesClient:            changesService{dnsClient.Changes},
 		ctx:                      ctx,
 	}
 
-	return provider, nil
+	return gprovider, nil
 }
 
-// Zones returns the list of hosted zones.
+// Zones returns the list of hosted zones, using the domainFilter, zoneTypeFilter, zoneIDFilter
+// to limit the results.
 func (p *GoogleProvider) Zones(ctx context.Context) (map[string]*dns.ManagedZone, error) {
 	zones := make(map[string]*dns.ManagedZone)
 
@@ -193,28 +265,25 @@ func (p *GoogleProvider) Zones(ctx context.Context) (map[string]*dns.ManagedZone
 	}
 
 	log.Debugf("Matching zones against domain filters: %v", p.domainFilter)
-	if err := p.managedZonesClient.List(p.project).Pages(ctx, f); err != nil {
+	if err := p.managedZonesClient.List(p.Project).Pages(ctx, f); err != nil {
 		return nil, err
 	}
 
 	if len(zones) == 0 {
-		log.Warnf("No zones in the project, %s, match domain filters: %v", p.project, p.domainFilter)
+		log.Warnf("No zones in the project, %s, match domain filters: %v", p.Project, p.domainFilter)
 	}
 
 	for _, zone := range zones {
 		log.Debugf("Considering zone: %s (domain: %s)", zone.Name, zone.DnsName)
 	}
 
+	// TODO: filter out .cluster.local zones and other GKE-reconciled zones.
+
 	return zones, nil
 }
 
 // Records returns the list of records in all relevant zones.
 func (p *GoogleProvider) Records(ctx context.Context) (endpoints []*endpoint.Endpoint, _ error) {
-	zones, err := p.Zones(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	f := func(resp *dns.ResourceRecordSetsListResponse) error {
 		for _, r := range resp.Rrsets {
 			if !p.SupportedRecordType(r.Type) {
@@ -226,8 +295,22 @@ func (p *GoogleProvider) Records(ctx context.Context) (endpoints []*endpoint.End
 		return nil
 	}
 
+	// TODO: add an extra interface that allows passing a struct with more info
+	zn := ctx.Value("zone")
+	if zn != nil {
+		if err := p.resourceRecordSetsClient.List(p.Project, zn.(string)).Pages(ctx, f); err != nil {
+			return nil, err
+		}
+		return endpoints, nil
+	}
+
+	zones, err := p.Zones(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, z := range zones {
-		if err := p.resourceRecordSetsClient.List(p.project, z.Name).Pages(ctx, f); err != nil {
+		if err := p.resourceRecordSetsClient.List(p.Project, z.Name).Pages(ctx, f); err != nil {
 			return nil, err
 		}
 	}
@@ -235,7 +318,25 @@ func (p *GoogleProvider) Records(ctx context.Context) (endpoints []*endpoint.End
 	return endpoints, nil
 }
 
-// ApplyChanges applies a given set of changes in a given zone.
+func (p *GoogleProvider) RecordsX(ctx context.Context, zn string, types map[string]string) (endpoints []*endpoint.Endpoint, _ error) {
+	f := func(resp *dns.ResourceRecordSetsListResponse) error {
+		for _, r := range resp.Rrsets {
+			if types != nil && types[r.Type] == "" {
+				continue
+			}
+			endpoints = append(endpoints, endpoint.NewEndpointWithTTL(r.Name, r.Type, endpoint.TTL(r.Ttl), r.Rrdatas...))
+		}
+
+		return nil
+	}
+
+	if err := p.resourceRecordSetsClient.List(p.Project, zn).Pages(ctx, f); err != nil {
+		return nil, err
+	}
+	return endpoints, nil
+}
+
+// ApplyChanges applies a given set of changes in a given zone. Only DNS domains that are configured are allowed.
 func (p *GoogleProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) error {
 	change := &dns.Change{}
 
@@ -255,7 +356,7 @@ func (p *GoogleProvider) SupportedRecordType(recordType string) bool {
 	case "MX":
 		return true
 	default:
-		return true // provider.SupportedRecordType(recordType)
+		return provider.SupportedRecordType(recordType)
 	}
 }
 
@@ -288,7 +389,7 @@ func (p *GoogleProvider) submitChange(ctx context.Context, change *dns.Change) e
 	changes := separateChange(zones, change)
 
 	for zone, change := range changes {
-		for batch, c := range batchChange(change, p.batchChangeSize) {
+		for batch, c := range batchChange(change, p.BatchChangeSize) {
 			log.Infof("Change zone: %v batch #%d", zone, batch)
 			for _, del := range c.Deletions {
 				log.Infof("Del records: %s %s %s %d", del.Name, del.Type, del.Rrdatas, del.Ttl)
@@ -301,11 +402,11 @@ func (p *GoogleProvider) submitChange(ctx context.Context, change *dns.Change) e
 				continue
 			}
 
-			if _, err := p.changesClient.Create(p.project, zone, c).Do(); err != nil {
+			if _, err := p.changesClient.Create(p.Project, zone, c).Do(); err != nil {
 				return err
 			}
 
-			time.Sleep(p.batchChangeInterval)
+			time.Sleep(p.BatchChangeInterval)
 		}
 	}
 

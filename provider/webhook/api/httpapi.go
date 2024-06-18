@@ -101,6 +101,7 @@ func (p *WebhookServer) AdjustEndpointsHandler(w http.ResponseWriter, req *http.
 	}
 }
 
+// NegotiateHandler returns the domain filter for the supported provider.
 func (p *WebhookServer) NegotiateHandler(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set(ContentTypeHeader, MediaTypeFormatAndVersion)
 	json.NewEncoder(w).Encode(p.Provider.GetDomainFilter())
@@ -115,14 +116,9 @@ func (p *WebhookServer) NegotiateHandler(w http.ResponseWriter, req *http.Reques
 // - /records (POST): applies the changes
 // - /adjustendpoints (POST): executes the AdjustEndpoints method
 func StartHTTPApi(provider provider.Provider, startedChan chan struct{}, readTimeout, writeTimeout time.Duration, providerPort string) {
-	p := WebhookServer{
-		Provider: provider,
-	}
 
 	m := http.NewServeMux()
-	m.HandleFunc("/", p.NegotiateHandler)
-	m.HandleFunc("/records", p.RecordsHandler)
-	m.HandleFunc("/adjustendpoints", p.AdjustEndpointsHandler)
+	InitHandlers(provider, m)
 
 	s := &http.Server{
 		Addr:         providerPort,
@@ -143,4 +139,16 @@ func StartHTTPApi(provider provider.Provider, startedChan chan struct{}, readTim
 	if err := s.Serve(l); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// InitHandlers will initialize the HTTP handlers for the given provider.
+// Caller can start a server and handle TLS, auth, etc.
+func InitHandlers(provider provider.Provider, m *http.ServeMux) {
+	p := WebhookServer{
+		Provider: provider,
+	}
+
+	m.HandleFunc("/", p.NegotiateHandler)
+	m.HandleFunc("/records", p.RecordsHandler)
+	m.HandleFunc("/adjustendpoints", p.AdjustEndpointsHandler)
 }
