@@ -98,18 +98,29 @@ func (c changesService) Create(project string, managedZone string, change *dns.C
 	return c.service.Create(project, managedZone, change)
 }
 
+// GoogleProviderCfg is the configuration for Google CloudDNS provider, serializable as json/yaml for declarative configs.
+type GoogleProviderCfg struct {
+	// Zones allows user to specify the zones to use and corresponding domains.
+	// Setting this will skip listing zones - which the user may not have IAM permissions to do.
+	// The user still needs IAM permission to each of the zones listed here.
+	// Setting this up explicitly is also safer and faster.
+	Zones map[string]string
+
+	Project string
+}
+
 // GoogleProvider is an implementation of Provider for Google CloudDNS.
 type GoogleProvider struct {
 	provider.BaseProvider
 	// The Google Project to work in
 	Project string
 
-	// The zone to use
+	// Zone is a single zone to use
 	Zone string
-	
+
 	// Enabled dry-run will print any modifying actions rather than execute them.
 	dryRun bool
-	
+
 	// Max batch size to submit to Google Cloud DNS per transaction.
 	BatchChangeSize int
 	// Interval between batch updates.
@@ -130,7 +141,10 @@ type GoogleProvider struct {
 	changesClient changesServiceInterface
 
 	// The context parameter to be passed for gcloud API calls.
-	ctx context.Context
+	ctx       context.Context
+
+	zoneNames map[string]string
+	zoneNamesTimestamp time.Time
 }
 
 // NewGoogleProvider initializes a new Google CloudDNS based Provider.
@@ -145,8 +159,6 @@ type GoogleProvider struct {
 //
 // Env variables used for config:
 // PROJECT_ID - google project ID to use
-// ZONE - use a specific zone. If not specified (or passed via CLI) - will list zones.
-//
 func NewGoogleProvider(ctx context.Context, project string, domainFilter endpoint.DomainFilter, zoneIDFilter provider.ZoneIDFilter, batchChangeSize int, batchChangeInterval time.Duration, zoneVisibility string, dryRun bool) (*GoogleProvider, error) {
 	dnsClient, err := NewGoogleDNSClient(ctx)
 	if err != nil {
@@ -183,6 +195,21 @@ func NewGoogleProvider(ctx context.Context, project string, domainFilter endpoin
 
 	if zoneVisibility != "" {
 		gprovider.zoneTypeFilter = provider.NewZoneTypeFilter(zoneVisibility)
+	}
+	// Single zone in the filter - no need to list zones.
+	if len(zoneIDFilter.ZoneIDs) == 1 {
+		gprovider.Zone = zoneIDFilter.ZoneIDs[0]
+	}
+
+	if gprovider.Zone == "" {
+		// Query the zones once. Should be cached
+		zones, err := gprovider.Zones(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, z := range zones {
+			log.Info("Zone", " name", z.Name, " dns=", z.DnsName, " visibility=", z.Visibility)
+		}
 	}
 
 	return gprovider, nil
@@ -242,6 +269,29 @@ func NewGoogleZoneProvider(ctx context.Context, dnsClient *dns.Service, project,
 	return gprovider, nil
 }
 
+// Zone2Domain returns the map of zone name to corresponding domain.
+// It will return the user-configured map if provided, or query the zones in the project
+// otherwise. The result is cached for 5 minutes to avoid churn.
+//
+// User may not have permissions to list the zones or access other zones - IAM can be granted to zones.
+func (p *GoogleProvider) Zone2Domain(ctx context.Context) (map[string]string, error) {
+
+	if p.zoneNames != nil && time.Since(p.zoneNamesTimestamp) < 5*time.Minute {
+		return p.zoneNames, nil
+	}
+	z, err := p.Zones(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p.zoneNames = map[string]string{}
+
+	for _, zi := range z {
+		p.zoneNames[zi.Name] = zi.DnsName
+	}
+	p.zoneNamesTimestamp = time.Now()
+	return p.zoneNames, nil
+}
+
 // Zones returns the list of hosted zones, using the domainFilter, zoneTypeFilter, zoneIDFilter
 // to limit the results.
 func (p *GoogleProvider) Zones(ctx context.Context) (map[string]*dns.ManagedZone, error) {
@@ -253,15 +303,19 @@ func (p *GoogleProvider) Zones(ctx context.Context) (map[string]*dns.ManagedZone
 
 	f := func(resp *dns.ManagedZonesListResponse) error {
 		for _, zone := range resp.ManagedZones {
-			if zone.PeeringConfig == nil {
-				if p.domainFilter.Match(zone.DnsName) && p.zoneTypeFilter.Match(zone.Visibility) && (p.zoneIDFilter.Match(fmt.Sprintf("%v", zone.Id)) || p.zoneIDFilter.Match(fmt.Sprintf("%v", zone.Name))) {
-					zones[zone.Name] = zone
-					log.Debugf("Matched %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
-				} else {
-					log.Debugf("Filtered %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
-				}
-			} else {
+			if zone.PeeringConfig != nil {
 				log.Debugf("Filtered peering zone %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
+				continue
+			}
+			if strings.HasPrefix(zone.Name, "gke-") {
+				log.Debugf("Filtered gke zone %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
+				continue
+			}
+			if p.domainFilter.Match(zone.DnsName) && p.zoneTypeFilter.Match(zone.Visibility) && (p.zoneIDFilter.Match(fmt.Sprintf("%v", zone.Id)) || p.zoneIDFilter.Match(fmt.Sprintf("%v", zone.Name))) {
+				zones[zone.Name] = zone
+				log.Debugf("Matched %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
+			} else {
+				log.Debugf("Filtered %s (zone: %s) (visibility: %s)", zone.DnsName, zone.Name, zone.Visibility)
 			}
 		}
 
@@ -300,22 +354,20 @@ func (p *GoogleProvider) Records(ctx context.Context) (endpoints []*endpoint.End
 		return nil
 	}
 
-	// TODO: add an extra interface that allows passing a struct with more info
-	zn := ctx.Value("zone")
-	if zn != nil {
-		if err := p.resourceRecordSetsClient.List(p.Project, zn.(string)).Pages(ctx, f); err != nil {
+	if p.Zone != "" {
+		if err := p.resourceRecordSetsClient.List(p.Project, p.Zone).Pages(ctx, f); err != nil {
 			return nil, err
 		}
 		return endpoints, nil
 	}
 
-	zones, err := p.Zones(ctx)
+	zones, err := p.Zone2Domain(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, z := range zones {
-		if err := p.resourceRecordSetsClient.List(p.Project, z.Name).Pages(ctx, f); err != nil {
+	for n, _ := range zones {
+		if err := p.resourceRecordSetsClient.List(p.Project, n).Pages(ctx, f); err != nil {
 			return nil, err
 		}
 	}
@@ -381,11 +433,11 @@ func (p *GoogleProvider) newFilteredRecords(endpoints []*endpoint.Endpoint) []*d
 // submitChange takes a zone and a Change and sends it to Google.
 func (p *GoogleProvider) submitChange(ctx context.Context, change *dns.Change) error {
 	if len(change.Additions) == 0 && len(change.Deletions) == 0 {
-		log.Info("All records are already up to date")
+		log.Debug("All records are already up to date")
 		return nil
 	}
 
-	zones, err := p.Zones(ctx)
+	zones, err := p.Zone2Domain(ctx)
 	if err != nil {
 		return err
 	}
@@ -492,12 +544,12 @@ func batchChange(change *dns.Change, batchSize int) []*dns.Change {
 }
 
 // separateChange separates a multi-zone change into a single change per zone.
-func separateChange(zones map[string]*dns.ManagedZone, change *dns.Change) map[string]*dns.Change {
+func separateChange(zones map[string]string, change *dns.Change) map[string]*dns.Change {
 	changes := make(map[string]*dns.Change)
 	zoneNameIDMapper := provider.ZoneIDName{}
-	for _, z := range zones {
-		zoneNameIDMapper[z.Name] = z.DnsName
-		changes[z.Name] = &dns.Change{
+	for n, z := range zones {
+		zoneNameIDMapper[n] = z
+		changes[n] = &dns.Change{
 			Additions: []*dns.ResourceRecordSet{},
 			Deletions: []*dns.ResourceRecordSet{},
 		}

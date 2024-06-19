@@ -18,143 +18,179 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
-	"strings"
-	"text/template"
 
-	log "github.com/sirupsen/logrus"
+	"istio.io/api/networking/v1alpha3"
 	networkingv1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	istioclient "istio.io/client-go/pkg/clientset/versioned"
 	istioinformers "istio.io/client-go/pkg/informers/externalversions"
 	networkingv1alpha3informer "istio.io/client-go/pkg/informers/externalversions/networking/v1alpha3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	kubeinformers "k8s.io/client-go/informers"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-
+	// Integration with external-dns - implement the source interface.
 	"sigs.k8s.io/external-dns/endpoint"
 )
 
-// virtualServiceSource is an implementation of Source for Istio VirtualService objects.
-// The implementation uses the spec.hosts values for the hostnames.
-// Use targetAnnotationKey to explicitly set Endpoint.
-type ServiceEntrySource struct {
-	kubeClient               kubernetes.Interface
-	istioClient              istioclient.Interface
-	namespace                string
-	annotationFilter         string
-	fqdnTemplate             *template.Template
-	combineFQDNAnnotation    bool
-	ignoreHostnameAnnotation bool
+// TODO:
+// - reverse external dns - create SE from DNS as source of truth
+// - policy - may also live in the controller or DNS updater !
+// - split mode - generate records.yaml from each K8S cluster or from files,
+//   second tool will read the records.yaml plus existing entries and update the DNS
+// - it should also work offline, using files (CI/CD mode). Review and apply independently.
+// - patch the SE for auto-alloc - or for the DNS IP from DNS ( other cluster or tool auto-allocs)
+// - don't auto-alloc for http, https
+// - multi-cluster - setup a set of clusters ( kubeconfig or the Istio MC), do reverse update (possibly using a primary config cluster)
 
-	virtualserviceInformer   networkingv1alpha3informer.ServiceEntryInformer
+// ServiceEntrySource is an implementation of Source for Istio ServiceEntry objects.
+//
+// It is strongly recommended to only use ServiceEntry as DNS config for mesh internal
+// names as well as 'egress'.
+//
+// This Source DOES NOT require or use the annotation - it provides similar behavior to
+// Istio DNS interception, but with the ability to use external DNS.
+type ServiceEntrySource struct {
+	kubeClient kubernetes.Interface
+
+	istioClient istioclient.Interface
+	seInformer  networkingv1alpha3informer.ServiceEntryInformer
+	ServiceEntrySourceConfig
+	syncHandler *OnAnyChange
 }
 
-func NewIstioServiceEntrySource(
-	ctx context.Context,
-	kubeClient kubernetes.Interface,
-	istioClient istioclient.Interface,
-	namespace string,
-	annotationFilter string,
-	fqdnTemplate string,
-	combineFQDNAnnotation bool,
-	ignoreHostnameAnnotation bool,
-) (Source, error) {
-	tmpl, err := parseTemplate(fqdnTemplate)
-	if err != nil {
-		return nil, err
+type ServiceEntrySourceConfig struct {
+	// MeshExternalNamespace is the namespace for MESH_EXTERNAL ServiceEntry.
+	// Allowing arbitrary untrusted namespaces to define DNS records is a security risk.
+	MeshExternalNamespace string
+
+	// MeshInternalDomain is the domain suffix for MESH_INTERNAL ServiceEntry.
+	// The entry MUST be in the format NAME.NAMESPACE.MESH_DOMAIN.
+	MeshInternalDomain string
+
+	// WIP: EgressGatewayVIP is the IP of the egress gateway. All MESH_EXTERNAL ServiceEntry
+	// without an IP will get allocate this VIP. Entries should only go to a private
+	// zone, and EgressGateway must also be external (not use the zone).
+	EgressGatewayVIP []string
+
+	// HttpVIP is a VIP to be assigned to all MESH_INTERNAL ServiceEntry with HTTP or HTTPS
+	// ports and without an explicit IP. This is to allow for a single VIP to be used for
+	// all HTTP - without relying on auto-allocation and using different IPs. Istio will
+	// generate a listener for the VIP and route based on the Host header.
+	HttpVIP string
+
+	UpdateServiceEntry bool
+}
+
+func NewIstioServiceEntrySourceConfig(
+		ctx context.Context,
+		kubeClient kubernetes.Interface,
+		istioClient istioclient.Interface,
+		config ServiceEntrySourceConfig) (Source, error) {
+
+	ses := &ServiceEntrySource{
+		kubeClient:            kubeClient,
+		istioClient: istioClient,
+		ServiceEntrySourceConfig: config,
+		syncHandler: &OnAnyChange{},
 	}
 
-	// Use shared informers to listen for add/update/delete of services/pods/nodes in the specified namespace.
-	// Set resync period to 0, to prevent processing when nothing has changed
-	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, 0, kubeinformers.WithNamespace(namespace))
+	ses.syncHandler.source = ses
 
-	istioInformerFactory := istioinformers.NewSharedInformerFactoryWithOptions(istioClient, 0, istioinformers.WithNamespace(namespace))
-	virtualServiceInformer := istioInformerFactory.Networking().V1alpha3().ServiceEntries()
+	// Use shared informers to listen for add/update/delete of services/pods/nodes in the specified namespace.
+
+	istioInformerFactory := istioinformers.NewSharedInformerFactoryWithOptions(istioClient, 0, istioinformers.WithNamespace(""))
+	serviceEntryInformer := istioInformerFactory.Networking().V1alpha3().ServiceEntries()
+
+	ses.seInformer = serviceEntryInformer
 
 	// Add default resource event handlers to properly initialize informer.
+	// This is required to avoid missing events during the initial synchronization,
+	// and will receive all existing SE objects.
 
-	virtualServiceInformer.Informer().AddEventHandler(
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				log.Debug("service entry added")
-			},
-		},
-	)
-
-	informerFactory.Start(ctx.Done())
+	serviceEntryInformer.Informer().AddEventHandler(ses.syncHandler)
 	istioInformerFactory.Start(ctx.Done())
 
 	// wait for the local cache to be populated.
-	if err := waitForCacheSync(context.Background(), informerFactory); err != nil {
-		return nil, err
-	}
 	if err := waitForCacheSync(context.Background(), istioInformerFactory); err != nil {
 		return nil, err
 	}
 
-	return &ServiceEntrySource{
-		kubeClient:               kubeClient,
-		istioClient:              istioClient,
-		namespace:                namespace,
-		annotationFilter:         annotationFilter,
-		fqdnTemplate:             tmpl,
-		combineFQDNAnnotation:    combineFQDNAnnotation,
-		ignoreHostnameAnnotation: ignoreHostnameAnnotation,
-		virtualserviceInformer:   virtualServiceInformer,
-	}, nil
+	return ses, nil
+}
+
+func (sc *ServiceEntrySource) SyncFromProvider(ctx context.Context, ep []*endpoint.Endpoint) error {
+
+
+	return nil
+}
+
+func (sc *ServiceEntrySource) PatchSE(ctx context.Context, ns, name, address string) error {
+	se := networkingv1alpha3.ServiceEntry{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{"external-dns/patched": "true"},
+		},
+	}
+
+	seBytes, err := json.Marshal(se)
+	if err != nil {
+		return err
+	}
+
+	sc.istioClient.NetworkingV1alpha3().ServiceEntries(ns).Patch(ctx, name, types.StrategicMergePatchType, seBytes, metav1.PatchOptions{FieldManager: "ext-dns"})
+	return nil
 }
 
 // Endpoints returns endpoint objects for each host-target combination that should be processed.
 // Retrieves all VirtualService resources in the source's namespace(s).
 func (sc *ServiceEntrySource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
-	virtualServices, err := sc.virtualserviceInformer.Lister().ServiceEntries(sc.namespace).List(labels.Everything())
+
+	var endpoints []*endpoint.Endpoint
+
+	// External ServiceEntries
+
+	// If namespace empty - all namespaces are listed.
+	serviceEntries, err := sc.seInformer.Lister().ServiceEntries(sc.MeshExternalNamespace).List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
 
-	//virtualServices, err = sc.filterByAnnotations(virtualServices)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	var endpoints []*endpoint.Endpoint
-
-	for _, virtualService := range virtualServices {
-		// Check controller annotation to see if we are responsible.
-		controller, ok := virtualService.Annotations[controllerAnnotationKey]
-		if ok && controller != controllerAnnotationValue {
-			log.Debugf("Skipping VirtualService %s/%s because controller value does not match, found: %s, required: %s",
-				virtualService.Namespace, virtualService.Name, controller, controllerAnnotationValue)
+	for _, se := range serviceEntries {
+		if se.Spec.Location !=  v1alpha3.ServiceEntry_MESH_EXTERNAL {
 			continue
 		}
 
-		gwEndpoints, err := sc.dnsRecordsFromServiceEntry(ctx, virtualService)
+		gwEndpoints, err := sc.dnsRecordsFromExtServiceEntry(ctx, se)
 		if err != nil {
 			return nil, err
 		}
 
-		// apply template if host is missing on VirtualService
-		//if (sc.combineFQDNAnnotation || len(gwEndpoints) == 0) && sc.fqdnTemplate != nil {
-		//	iEndpoints, err := sc.endpointsFromTemplate(ctx, virtualService)
-		//	if err != nil {
-		//		return nil, err
-		//	}
-		//
-		//	if sc.combineFQDNAnnotation {
-		//		gwEndpoints = append(gwEndpoints, iEndpoints...)
-		//	} else {
-		//		gwEndpoints = iEndpoints
-		//	}
-		//}
+		slog.Debug("Endpoints generated from VirtualService", "namespace", se.Namespace, "name", se.Name,"records",  gwEndpoints)
+		endpoints = append(endpoints, gwEndpoints...)
+	}
 
-		if len(gwEndpoints) == 0 {
-			log.Debugf("No endpoints could be generated from VirtualService %s/%s", virtualService.Namespace, virtualService.Name)
+	// TODO: label to declare 'frontend' vs 'backend' SE
+
+	// If namespace empty - all namespaces are listed.
+	serviceEntriesInt, err := sc.seInformer.Lister().ServiceEntries("").List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+
+	for _, se := range serviceEntriesInt {
+		if se.Spec.Location !=  v1alpha3.ServiceEntry_MESH_INTERNAL {
 			continue
 		}
 
-		log.Debugf("Endpoints generated from VirtualService: %s/%s: %v", virtualService.Namespace, virtualService.Name, gwEndpoints)
+		gwEndpoints, err := sc.dnsRecordsFromServiceEntry(ctx, se)
+		if err != nil {
+			return nil, err
+		}
+
+		slog.Debug("Endpoints generated from VirtualService", "namespace", se.Namespace, "name", se.Name,"records",  gwEndpoints)
 		endpoints = append(endpoints, gwEndpoints...)
 	}
 
@@ -165,37 +201,55 @@ func (sc *ServiceEntrySource) Endpoints(ctx context.Context) ([]*endpoint.Endpoi
 	return endpoints, nil
 }
 
-// AddEventHandler adds an event handler that should be triggered if the watched Istio VirtualService changes.
+// AddEventHandler adds an event handler that should be triggered if the watched
+// object changes, resulting in scheduling a full resync, with some throttling.
+//
+// This is triggered by the '--events' option in external-dns default main, and results
+// in faster sync of the DNS. It is called before SyncOnce or Start - but it does add
+// a second SyncOnce since all existing objects will trigger the events.
 func (sc *ServiceEntrySource) AddEventHandler(ctx context.Context, handler func()) {
-	log.Debug("Adding event handler for Istio ServiceEntry")
-
-	sc.virtualserviceInformer.Informer().AddEventHandler(eventHandlerFunc(handler))
+	sc.syncHandler.resyncF = handler
 }
 
-// dnsRecordsFromServiceEntry extracts the endpoints from an Istio VirtualService Config object
-func (sc *ServiceEntrySource) dnsRecordsFromServiceEntry(ctx context.Context, se *networkingv1alpha3.ServiceEntry) ([]*endpoint.Endpoint, error) {
-	var endpoints []*endpoint.Endpoint
-	//var err error
+type OnAnyChange struct {
+	resyncF func()
+	source *ServiceEntrySource
+}
 
-	resource := fmt.Sprintf("virtualservice/%s/%s", se.Namespace, se.Name)
+func (fn OnAnyChange) OnAdd(obj interface{}, isInInitialList bool) {
+	if isInInitialList {
+		return
+	}
+	if fn.resyncF != nil {
+		fn.resyncF()
+	}
+}
+
+func (fn OnAnyChange) OnUpdate(oldObj, newObj interface{})         {
+	if fn.resyncF != nil {
+		fn.resyncF()
+	}
+}
+
+func (fn OnAnyChange) OnDelete(obj interface{})                    {
+	if fn.resyncF != nil {
+		fn.resyncF()
+	}
+}
+
+func (sc *ServiceEntrySource) dnsRecordsFromServiceEntry(ctx context.Context, se *networkingv1alpha3.ServiceEntry) ([]*endpoint.Endpoint, error) {
+
+	var endpoints []*endpoint.Endpoint
+
+	resource := fmt.Sprintf("serviceentry/%s/%s", se.Namespace, se.Name)
 
 	ttl := getTTLFromAnnotations(se.Annotations, resource)
-
-
-	providerSpecific, setIdentifier := getProviderSpecificAnnotations(se.Annotations)
 
 	for _, host := range se.Spec.Hosts {
 		if host == "" || host == "*" {
 			continue
 		}
 
-		parts := strings.Split(host, "/")
-
-		// If the input hostname is of the form my-namespace/foo.bar.com, remove the namespace
-		// before appending it to the list of endpoints to create
-		if len(parts) == 2 {
-			host = parts[1]
-		}
 		targets := endpoint.Targets{}
 		for _, sea := range se.Spec.Addresses {
 			targets = append(targets, sea)
@@ -204,11 +258,53 @@ func (sc *ServiceEntrySource) dnsRecordsFromServiceEntry(ctx context.Context, se
 		// Auto-allocation should take into account the info in DNS - and set an annotation.
 
 		if len( targets) > 0 {
-			endpoints = append(endpoints, endpointsForHostname(host, targets, ttl, providerSpecific, setIdentifier, resource)...)
+			endpoints = append(endpoints, endpointsForHostname(host, targets, ttl, nil, "", resource)...)
 		}
 	}
 
 	return endpoints, nil
 }
 
+
+func (sc *ServiceEntrySource) dnsRecordsFromExtServiceEntry(ctx context.Context, se *networkingv1alpha3.ServiceEntry) ([]*endpoint.Endpoint, error) {
+
+	var endpoints []*endpoint.Endpoint
+
+	resource := fmt.Sprintf("serviceentry/%s/%s", se.Namespace, se.Name)
+
+	ttl := getTTLFromAnnotations(se.Annotations, resource)
+
+	for _, host := range se.Spec.Hosts {
+		if host == "" || host == "*" {
+			continue
+		}
+
+		targets := endpoint.Targets{}
+		for _, sea := range se.Spec.Addresses {
+			targets = append(targets, sea)
+		}
+
+		if len(targets) == 0 && sc.HttpVIP != "" {
+			// Is it http only ?
+			isHttp := true
+			for _, port := range se.Spec.Ports {
+				if port.Protocol != "http" && port.Protocol != "https" {
+					isHttp = false
+					break
+				}
+			}
+			if isHttp {
+				targets = append(targets, sc.HttpVIP)
+			}
+		}
+
+		// Auto-allocation should take into account the info in DNS - and set an annotation.
+
+		if len( targets) > 0 {
+			endpoints = append(endpoints, endpointsForHostname(host, targets, ttl, nil, "", resource)...)
+		}
+	}
+
+	return endpoints, nil
+}
 

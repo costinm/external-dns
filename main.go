@@ -397,8 +397,12 @@ func main() {
 	}
 
 	if cfg.WebhookServer {
+		webhookAddr := os.Getenv("EXTERNAL_DNS_WEBHOOK_ADDR")
+		if webhookAddr == "" {
+			webhookAddr = ":8080"
+		}
 		// TODO(costin): listen address (assume mesh or frontend authz)
-		webhookapi.StartHTTPApi(p, nil, cfg.WebhookProviderReadTimeout, cfg.WebhookProviderWriteTimeout, ":8080")
+		webhookapi.StartHTTPApi(p, nil, cfg.WebhookProviderReadTimeout, cfg.WebhookProviderWriteTimeout, webhookAddr)
 		os.Exit(0)
 	}
 
@@ -469,6 +473,9 @@ func handleSigterm(cancel func()) {
 }
 
 func serveMetrics(address string) {
+	if address == "" {
+		return
+	}
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))

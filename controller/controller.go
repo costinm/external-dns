@@ -202,6 +202,7 @@ type Controller struct {
 // RunOnce runs a single iteration of a reconciliation loop.
 func (c *Controller) RunOnce(ctx context.Context) error {
 	lastReconcileTimestamp.SetToCurrentTime()
+	t0 := time.Now()
 
 	records, err := c.Registry.Records(ctx)
 	if err != nil {
@@ -209,6 +210,7 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 		deprecatedRegistryErrors.Inc()
 		return err
 	}
+	t1 := time.Now()
 
 	registryEndpointsTotal.Set(float64(len(records)))
 	regARecords, regAAAARecords := countAddressRecords(records)
@@ -222,6 +224,7 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 		deprecatedSourceErrors.Inc()
 		return err
 	}
+	t2 := time.Now()
 	sourceEndpointsTotal.Set(float64(len(endpoints)))
 	srcARecords, srcAAAARecords := countAddressRecords(endpoints)
 	sourceARecords.Set(float64(srcARecords))
@@ -254,9 +257,11 @@ func (c *Controller) RunOnce(ctx context.Context) error {
 			deprecatedRegistryErrors.Inc()
 			return err
 		}
+		t3 := time.Now()
+		log.Info("All records are already up to date ", t1.Sub(t0), t2.Sub(t1), t3.Sub(t2), len(plan.Changes.Create), len(plan.Changes.UpdateNew), len(plan.Changes.UpdateOld), len(plan.Changes.Delete))
 	} else {
 		controllerNoChangesTotal.Inc()
-		log.Info("All records are already up to date")
+		log.Info("All records are already up to date ", t1.Sub(t0), t2.Sub(t1))
 	}
 
 	lastSyncTimestamp.SetToCurrentTime()

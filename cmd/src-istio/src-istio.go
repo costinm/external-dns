@@ -41,7 +41,10 @@ func main() {
 	}
 	kc, err := sg.KubeClient()
 	ic, err := sg.IstioClient()
-	src, err := source.NewIstioServiceEntrySource(ctx, kc, ic, "", "", "", false, false)
+
+
+
+	src, err := source.NewIstioServiceEntrySourceConfig(ctx, kc, ic, source.ServiceEntrySourceConfig{})
 	if err != nil {
 		log.Fatalf("Failed to create webhook provider: %v", err)
 	}
@@ -66,8 +69,12 @@ func main() {
 		p = wp
 	}
 
-	//registry.NewTXTRegistry(p, cfg.TXTPrefix, cfg.TXTSuffix, cfg.TXTOwnerID, cfg.TXTCacheInterval, cfg.TXTWildcardReplacement, cfg.ManagedDNSRecordTypes, cfg.ExcludeDNSRecordTypes, cfg.TXTEncryptEnabled, []byte(cfg.TXTEncryptAESKey))
-	r, err := registry.NewNoopRegistry(p)
+	recordTypes := []string{"A", "CNAME", "TXT", "SRV", "PTR", "CAA", "DS", "DNSKEY", "NAPTR", "TLSA", "URI"}
+
+	//%{record_type}-prefix- and suffix are added to the TXT records
+	// ownerID should include the cluster name (config cluster)
+	r, err := registry.NewTXTRegistry(p, "k8s-%{record_type}-", "", "k8s", 0, "all", recordTypes, nil, false, nil)
+	// registry.NewNoopRegistry(p)
 
 	r.Records(ctx)
 
@@ -79,31 +86,30 @@ func main() {
 		// create-only - doesn't update
 		// sync - delete too
 		Policy:               plan.Policies["sync"],
-		Interval:             10 * time.Second,
+		// Using watcher - no need to have interval
+		Interval:             3600 * time.Second,
 		//DomainFilter:         domainFilter,
-		//ManagedRecordTypes:   cfg.ManagedDNSRecordTypes,
+		ManagedRecordTypes:   recordTypes,
 		//ExcludeRecordTypes:   cfg.ExcludeDNSRecordTypes,
 		MinEventSyncInterval: 5 * time.Second,
 	}
 
-	if true {
+	if false {
 		err := ctrl.RunOnce(ctx)
 		if err != nil {
 			log.Fatal(err)
 		}
-	}
-
-	if true {
+	} else {
 		// Add RunOnce as the handler function that will be called when ingress/service sources have changed.
 		// Note that k8s Informers will perform an initial list operation, which results in the handler
 		// function initially being called for every Service/Ingress that exists
 		src.AddEventHandler(ctx, func() {
 			// This will be called for all existing SE - causing a lot of churn and a sync.
 			//log.Println("SE event handler called.")
-			ctrl.ScheduleRunOnce(time.Now()) })
+			ctrl.ScheduleRunOnce(time.Now())
+		})
+
+		ctrl.ScheduleRunOnce(time.Now())
+		ctrl.Run(ctx)
 	}
-
-	ctrl.ScheduleRunOnce(time.Now())
-	ctrl.Run(ctx)
-
 }

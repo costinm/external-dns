@@ -207,6 +207,10 @@ func ByNames(ctx context.Context, p ClientGenerator, names []string, cfg *Config
 // BuildWithConfig allows to generate a Source implementation from the shared config
 func BuildWithConfig(ctx context.Context, source string, p ClientGenerator, cfg *Config) (Source, error) {
 	switch source {
+
+	case "empty":
+		// empty can be used for webhook, to avoid initializing K8S.
+		return &emptySource{}, nil
 	case "node":
 		client, err := p.KubeClient()
 		if err != nil {

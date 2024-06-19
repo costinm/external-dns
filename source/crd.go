@@ -60,6 +60,9 @@ func addKnownTypes(scheme *runtime.Scheme, groupVersion schema.GroupVersion) err
 	return nil
 }
 
+// TODO: extend the CRD to include other common patterns
+// - Gateway - IP in status, hosts under spec
+
 // NewCRDClientForAPIVersionKind return rest client for the given apiVersion and kind of the CRD
 func NewCRDClientForAPIVersionKind(client kubernetes.Interface, kubeConfig, apiServerURL, apiVersion, kind string) (*rest.RESTClient, *runtime.Scheme, error) {
 	if kubeConfig == "" {
