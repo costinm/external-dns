@@ -49,13 +49,13 @@ func main() {
 		log.Fatalf("Failed to create webhook provider: %v", err)
 	}
 
-	ep, err  := src.Endpoints(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, e := range ep {
-		log.Println(e)
-	}
+	//ep, err  := src.Endpoints(ctx)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//for _, e := range ep {
+	//	log.Println(e)
+	//}
 
 	var p provider.Provider
 	if cfg.Address == "" {

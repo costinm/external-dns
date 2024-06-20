@@ -30,47 +30,23 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type PodSource struct {
+type podSource struct {
 	client        kubernetes.Interface
 	namespace     string
 	podInformer   coreinformers.PodInformer
 	nodeInformer  coreinformers.NodeInformer
 	compatibility string
-
-	Internal string
 }
 
-// NewPodSource creates a new PodSource with the given config.
-func NewPodSource(ctx context.Context, kubeClient kubernetes.Interface, namespace string, compatibility string) (*PodSource, error) {
-	ps := &PodSource{
-		client:        kubeClient,
-		namespace:     namespace,
-		compatibility: compatibility,
-	}
-	return ps, ps.Init(ctx)
-}
-
-func (ps *PodSource) Init(ctx context.Context) error {
-	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(ps.client, 0, kubeinformers.WithNamespace(ps.namespace))
+// NewPodSource creates a new podSource with the given config.
+func NewPodSource(ctx context.Context, kubeClient kubernetes.Interface, namespace string, compatibility string) (Source, error) {
+	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, 0, kubeinformers.WithNamespace(namespace))
 	podInformer := informerFactory.Core().V1().Pods()
 	nodeInformer := informerFactory.Core().V1().Nodes()
 
 	podInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				pod := obj.(*corev1.Pod)
-				e := endpoint.NewEndpoint(pod.Name+"."+pod.Namespace, "A", pod.Status.PodIP)
-				log.Println("Added", e)
-			},
-			UpdateFunc: func(old, obj interface{}) {
-				pod := obj.(*corev1.Pod)
-				e := endpoint.NewEndpoint(pod.Name+"."+pod.Namespace, "A", pod.Status.PodIP)
-				log.Println("Updated", e)
-			},
-			DeleteFunc: func(obj interface{}) {
-				pod := obj.(*corev1.Pod)
-				e := endpoint.NewEndpoint(pod.Name+"."+pod.Namespace, "A", pod.Status.PodIP)
-				log.Println("Delete", e)
 			},
 		},
 	)
@@ -80,23 +56,27 @@ func (ps *PodSource) Init(ctx context.Context) error {
 			},
 		},
 	)
-	ps.podInformer = podInformer
-	ps.nodeInformer = nodeInformer
 
 	informerFactory.Start(ctx.Done())
 
 	// wait for the local cache to be populated.
 	if err := waitForCacheSync(context.Background(), informerFactory); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &podSource{
+		client:        kubeClient,
+		podInformer:   podInformer,
+		nodeInformer:  nodeInformer,
+		namespace:     namespace,
+		compatibility: compatibility,
+	}, nil
 }
 
-func (*PodSource) AddEventHandler(ctx context.Context, handler func()) {
+func (*podSource) AddEventHandler(ctx context.Context, handler func()) {
 }
 
-func (ps *PodSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
+func (ps *podSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	pods, err := ps.podInformer.Lister().Pods(ps.namespace).List(labels.Everything())
 	if err != nil {
 		return nil, err
@@ -104,12 +84,6 @@ func (ps *PodSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error
 
 	endpointMap := make(map[endpoint.EndpointKey][]string)
 	for _, pod := range pods {
-		if ps.Internal != "" {
-			// return internal endpoint IPs
-			addToEndpointMap(endpointMap, pod.Name+"."+pod.Namespace+".p."+ps.Internal, "A", pod.Status.PodIP)
-			continue
-		}
-
 		if !pod.Spec.HostNetwork {
 			log.Debugf("skipping pod %s. hostNetwork=false", pod.Name)
 			continue

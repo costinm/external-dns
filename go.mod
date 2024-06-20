@@ -2,9 +2,9 @@ module sigs.k8s.io/external-dns
 
 go 1.22.4
 
-replace (
-	sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
-)
+// replace (
+// 	sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
+// )
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0
