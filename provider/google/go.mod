@@ -4,6 +4,10 @@ go 1.22.2
 
 toolchain go1.22.4
 
+replace (
+	sigs.k8s.io/external-dns => ../../.. 
+)
+
 require (
 	cloud.google.com/go/compute/metadata v0.3.0
 

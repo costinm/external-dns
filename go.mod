@@ -2,12 +2,10 @@ module sigs.k8s.io/external-dns
 
 go 1.22.4
 
-// replace (
 // 	sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
-// )
+replace sigs.k8s.io/external-dns/provider/google => ./provider/google
 
 require (
-	cloud.google.com/go/compute/metadata v0.3.0
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.12.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.6.0
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns v1.2.0
@@ -71,7 +69,6 @@ require (
 	golang.org/x/oauth2 v0.21.0
 	golang.org/x/sync v0.7.0
 	golang.org/x/time v0.5.0
-	google.golang.org/api v0.185.0
 	gopkg.in/ns1/ns1-go.v2 v2.11.0
 	gopkg.in/yaml.v2 v2.4.0
 	istio.io/api v1.22.1
@@ -80,17 +77,20 @@ require (
 	k8s.io/apimachinery v0.30.2
 	k8s.io/client-go v0.30.2
 	k8s.io/klog/v2 v2.130.0
+	sigs.k8s.io/external-dns/provider/google v0.0.0-00010101000000-000000000000
 	sigs.k8s.io/gateway-api v1.1.0
 )
 
 require (
 	cloud.google.com/go/auth v0.5.1 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.2 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	code.cloudfoundry.org/gofileutils v0.0.0-20170111115228-4d0c80011a0f // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.9.0 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.2.2 // indirect
 	github.com/Masterminds/semver v1.4.2 // indirect
 	github.com/Yamashou/gqlgenc v0.14.0 // indirect
+	github.com/agnivade/levenshtein v1.1.1 // indirect
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20180613141037-e580b900e9f5 // indirect
 	github.com/ans-group/go-durationstring v1.2.0 // indirect
@@ -187,7 +187,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/terra-farm/udnssdk v1.3.5 // indirect
-	github.com/vektah/gqlparser/v2 v2.5.14 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.16 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.14 // indirect
 	go.mongodb.org/mongo-driver v1.14.0 // indirect
@@ -206,6 +206,7 @@ require (
 	golang.org/x/term v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
+	google.golang.org/api v0.185.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240610135401-a8a62080eff3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240617180043-68d350f18fd4 // indirect
 	google.golang.org/grpc v1.64.0 // indirect

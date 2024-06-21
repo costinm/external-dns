@@ -156,3 +156,6 @@ release.prod: test
 .PHONY: ko
 ko:
 	scripts/install-ko.sh
+
+ci:
+	go get -v -t -d ./...
