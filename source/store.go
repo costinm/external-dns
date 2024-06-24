@@ -235,6 +235,8 @@ func BuildWithConfig(ctx context.Context, source string, p ClientGenerator, cfg 
 			return nil, err
 		}
 		return NewPodSource(ctx, client, cfg.Namespace, cfg.Compatibility)
+	case "k8s":
+		return NewK8SSource(p, cfg)
 	case "gateway":
 		return NewGatewaySource(p, cfg)
 	case "gateway-httproute":
@@ -247,6 +249,23 @@ func BuildWithConfig(ctx context.Context, source string, p ClientGenerator, cfg 
 		return NewGatewayTCPRouteSource(p, cfg)
 	case "gateway-udproute":
 		return NewGatewayUDPRouteSource(p, cfg)
+	case "istio-se":
+		kubernetesClient, err := p.KubeClient()
+		if err != nil {
+			return nil, err
+		}
+		istioClient, err := p.IstioClient()
+		if err != nil {
+			return nil, err
+		}
+		return NewIstioServiceEntrySourceConfig(ctx, kubernetesClient, istioClient,
+			ServiceEntrySourceConfig{
+				MeshExternalNamespace: "",
+				MeshInternalDomain:    "",
+				EgressGatewayVIP:      nil,
+				HttpVIP:               "",
+				UpdateServiceEntry:    false,
+			})
 	case "istio-gateway":
 		kubernetesClient, err := p.KubeClient()
 		if err != nil {

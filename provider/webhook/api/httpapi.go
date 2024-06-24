@@ -118,7 +118,7 @@ func (p *WebhookServer) NegotiateHandler(w http.ResponseWriter, req *http.Reques
 func StartHTTPApi(provider provider.Provider, startedChan chan struct{}, readTimeout, writeTimeout time.Duration, providerPort string) {
 
 	m := http.NewServeMux()
-	InitHandlers(provider, m)
+	InitHandlers(provider, m, "")
 
 	s := &http.Server{
 		Addr:         providerPort,
@@ -143,12 +143,21 @@ func StartHTTPApi(provider provider.Provider, startedChan chan struct{}, readTim
 
 // InitHandlers will initialize the HTTP handlers for the given provider.
 // Caller can start a server and handle TLS, auth, etc.
-func InitHandlers(provider provider.Provider, m *http.ServeMux) {
+// The prefix allows multiple providers to be served on the same port and optional
+// parameters like zone.
+func InitHandlers(provider provider.Provider, m *http.ServeMux, prefix string) {
 	p := WebhookServer{
 		Provider: provider,
 	}
 
-	m.HandleFunc("/", p.NegotiateHandler)
-	m.HandleFunc("/records", p.RecordsHandler)
-	m.HandleFunc("/adjustendpoints", p.AdjustEndpointsHandler)
+	// This actually returns the domain filter for the provider - i.e. list of domains.
+	// May be extended to return other properties of the provider that can be used to
+	// customize the controller. For example, it may return the URL for sending the updates, indication on how to get tokens, etc.
+	//
+	// This can also be expressed as a CRD.
+	m.HandleFunc(prefix + "/", p.NegotiateHandler)
+
+	//
+	m.HandleFunc(prefix +"/records", p.RecordsHandler)
+	m.HandleFunc(prefix +"/adjustendpoints", p.AdjustEndpointsHandler)
 }

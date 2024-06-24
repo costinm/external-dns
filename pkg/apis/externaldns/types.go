@@ -24,12 +24,10 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/labels"
-
-	"sigs.k8s.io/external-dns/endpoint"
-
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/external-dns/endpoint"
 
 	"sigs.k8s.io/external-dns/source"
 )
@@ -41,327 +39,399 @@ const (
 // Version is the current version of the app, generated at build time
 var Version = "unknown"
 
-// Config is a project-wide configuration
+// ServerConfig defines the configuration for the ext dns server
+type ServerConfig struct {
+	ServerAddress     string
+	MonitoringAddress string
+}
+
+// ExtDNSConfig defines the configuration for a multi-provider server, capable
+// of syncing DNS entries operating multiple syncs.
+//
+// This is enabled with a JSON or yaml configuration instead of CLI.
+// Using CLI it is possible to operate a single provider.
+type ExtDNSConfig struct {
+
+	// SyncTargets is the map of providers to associated sources and settings.
+	SyncTargets map[string]*Config
+
+	// ProviderServers defines webhooks for multiple providers.
+	ProviderServers map[string]*Config
+
+	ServerConfig
+}
+
+// Config defines a provider target and multiple sources plus registry and
+// related information. It is used with the CLI to operate a single provider.
 type Config struct {
-	APIServerURL                       string
-	KubeConfig                         string
-	RequestTimeout                     time.Duration
-	DefaultTargets                     []string
-	GlooNamespaces                     []string
-	SkipperRouteGroupVersion           string
-	Sources                            []string
-	Namespace                          string
-	AnnotationFilter                   string
+	// Config is the source configuration.
+	source.Config
+
+	// Exceptions in the source config - dups, different type
+
 	LabelFilter                        string
-	IngressClassNames                  []string
-	FQDNTemplate                       string
-	CombineFQDNAndAnnotation           bool
-	IgnoreHostnameAnnotation           bool
-	IgnoreIngressTLSSpec               bool
-	IgnoreIngressRulesSpec             bool
-	GatewayNamespace                   string
-	GatewayLabelFilter                 string
-	Compatibility                      string
-	PublishInternal                    bool
-	PublishHostIP                      bool
-	AlwaysPublishNotReadyAddresses     bool
-	ConnectorSourceServer              string
-	Provider                           string
-	GoogleProject                      string
-	GoogleBatchChangeSize              int
-	GoogleBatchChangeInterval          time.Duration
-	GoogleZoneVisibility               string
-	DomainFilter                       []string
-	ExcludeDomains                     []string
-	RegexDomainFilter                  *regexp.Regexp
-	RegexDomainExclusion               *regexp.Regexp
-	ZoneNameFilter                     []string
-	ZoneIDFilter                       []string
-	TargetNetFilter                    []string
-	ExcludeTargetNets                  []string
-	AlibabaCloudConfigFile             string
-	AlibabaCloudZoneType               string
-	AWSZoneType                        string
-	AWSZoneTagFilter                   []string
-	AWSAssumeRole                      string
-	AWSProfiles                        []string
-	AWSAssumeRoleExternalID            string
-	AWSBatchChangeSize                 int
-	AWSBatchChangeSizeBytes            int
-	AWSBatchChangeSizeValues           int
-	AWSBatchChangeInterval             time.Duration
-	AWSEvaluateTargetHealth            bool
-	AWSAPIRetries                      int
-	AWSPreferCNAME                     bool
-	AWSZoneCacheDuration               time.Duration
-	AWSSDServiceCleanup                bool
-	AWSZoneMatchParent                 bool
-	AWSDynamoDBRegion                  string
-	AWSDynamoDBTable                   string
-	AzureConfigFile                    string
-	AzureResourceGroup                 string
-	AzureSubscriptionID                string
-	AzureUserAssignedIdentityClientID  string
-	AzureActiveDirectoryAuthorityHost  string
-	BluecatDNSConfiguration            string
-	BluecatConfigFile                  string
-	BluecatDNSView                     string
-	BluecatGatewayHost                 string
-	BluecatRootZone                    string
-	BluecatDNSServerName               string
-	BluecatDNSDeployType               string
-	BluecatSkipTLSVerify               bool
-	CloudflareProxied                  bool
-	CloudflareDNSRecordsPerPage        int
-	CoreDNSPrefix                      string
-	RcodezeroTXTEncrypt                bool
-	AkamaiServiceConsumerDomain        string
-	AkamaiClientToken                  string
-	AkamaiClientSecret                 string
-	AkamaiAccessToken                  string
-	AkamaiEdgercPath                   string
-	AkamaiEdgercSection                string
-	DynCustomerName                    string
-	DynUsername                        string
-	DynPassword                        string `secure:"yes"`
-	DynMinTTLSeconds                   int
-	OCIConfigFile                      string
-	OCICompartmentOCID                 string
-	OCIAuthInstancePrincipal           bool
-	OCIZoneScope                       string
-	OCIZoneCacheDuration               time.Duration
-	InMemoryZones                      []string
-	OVHEndpoint                        string
-	OVHApiRateLimit                    int
-	PDNSServer                         string
-	PDNSAPIKey                         string `secure:"yes"`
-	PDNSSkipTLSVerify                  bool
-	TLSCA                              string
-	TLSClientCert                      string
-	TLSClientCertKey                   string
-	Policy                             string
-	Registry                           string
-	TXTOwnerID                         string
-	TXTPrefix                          string
-	TXTSuffix                          string
-	TXTEncryptEnabled                  bool
-	TXTEncryptAESKey                   string `secure:"yes"`
-	Interval                           time.Duration
-	MinEventSyncInterval               time.Duration
-	Once                               bool
-	DryRun                             bool
-	UpdateEvents                       bool
-	LogFormat                          string
-	MetricsAddress                     string
-	LogLevel                           string
-	TXTCacheInterval                   time.Duration
-	TXTWildcardReplacement             string
-	ExoscaleEndpoint                   string
-	ExoscaleAPIKey                     string `secure:"yes"`
-	ExoscaleAPISecret                  string `secure:"yes"`
-	ExoscaleAPIEnvironment             string
-	ExoscaleAPIZone                    string
-	CRDSourceAPIVersion                string
-	CRDSourceKind                      string
-	ServiceTypeFilter                  []string
-	CFAPIEndpoint                      string
-	CFUsername                         string
-	CFPassword                         string
 	ResolveServiceLoadBalancerHostname bool
-	RFC2136Host                        string
-	RFC2136Port                        int
-	RFC2136Zone                        []string
-	RFC2136Insecure                    bool
-	RFC2136GSSTSIG                     bool
-	RFC2136KerberosRealm               string
-	RFC2136KerberosUsername            string
-	RFC2136KerberosPassword            string `secure:"yes"`
-	RFC2136TSIGKeyName                 string
-	RFC2136TSIGSecret                  string `secure:"yes"`
-	RFC2136TSIGSecretAlg               string
-	RFC2136TAXFR                       bool
-	RFC2136MinTTL                      time.Duration
-	RFC2136BatchChangeSize             int
-	RFC2136UseTLS                      bool
-	RFC2136SkipTLSVerify               bool
-	NS1Endpoint                        string
-	NS1IgnoreSSL                       bool
-	NS1MinTTLSeconds                   int
-	TransIPAccountName                 string
-	TransIPPrivateKeyFile              string
-	DigitalOceanAPIPageSize            int
-	ManagedDNSRecordTypes              []string
-	ExcludeDNSRecordTypes              []string
-	GoDaddyAPIKey                      string `secure:"yes"`
-	GoDaddySecretKey                   string `secure:"yes"`
-	GoDaddyTTL                         int64
-	GoDaddyOTE                         bool
-	OCPRouterName                      string
-	IBMCloudProxied                    bool
-	IBMCloudConfigFile                 string
-	TencentCloudConfigFile             string
-	TencentCloudZoneType               string
-	PiholeServer                       string
-	PiholePassword                     string `secure:"yes"`
-	PiholeTLSInsecureSkipVerify        bool
-	PluralCluster                      string
-	PluralProvider                     string
-	WebhookProviderURL                 string
-	WebhookProviderReadTimeout         time.Duration
-	WebhookProviderWriteTimeout        time.Duration
-	WebhookServer                      bool
-	TraefikDisableLegacy               bool
-	TraefikDisableNew                  bool
+
+	// Sources is the list of source names - they get their config from
+	// the above source.Config
+	Sources []string
+
+	// Provider, main and registry configuration
+
+	// Provider is the destination for the sync.
+	// Each config can have a single provider and multiple sources.
+	Provider string
+
+	DomainFilter         []string
+	ExcludeDomains       []string
+	RegexDomainFilter    *regexp.Regexp
+	RegexDomainExclusion *regexp.Regexp
+
+	ManagedDNSRecordTypes []string
+	ExcludeDNSRecordTypes []string
+
+	ZoneNameFilter []string
+	ZoneIDFilter   []string
+
+	TargetNetFilter   []string
+	ExcludeTargetNets []string
+
+	// Configurations for egress TLS connections.
+	TLSCA            string
+	TLSClientCert    string
+	TLSClientCertKey string
+
+	Policy string
+
+	Registry               string
+	TXTOwnerID             string
+	TXTPrefix              string
+	TXTSuffix              string
+	TXTEncryptEnabled      bool
+	TXTEncryptAESKey       string `secure:"yes"`
+	TXTCacheInterval       time.Duration
+	TXTWildcardReplacement string
+
+	Interval             time.Duration
+	MinEventSyncInterval time.Duration
+
+	// Operating mode settings
+
+	// Run once and exit
+	Once bool
+
+	// Provider will not write
+	DryRun bool
+
+	// Start a webhook server on default address.
+	WebhookServer bool
+
+	MetricsAddress string
+	LogFormat      string
+	LogLevel       string
+
+	// Provider specific options
+	ProviderConfig
+}
+
+type ProviderConfig struct {
+	AkamaiServiceConsumerDomain       string
+	AkamaiClientToken                 string
+	AkamaiClientSecret                string
+	AkamaiAccessToken                 string
+	AkamaiEdgercPath                  string
+	AkamaiEdgercSection               string
+
+	AlibabaCloudConfigFile            string
+	AlibabaCloudZoneType              string
+
+	AWSZoneType                       string
+	AWSZoneTagFilter                  []string
+	AWSAssumeRole                     string
+	AWSProfiles                       []string
+	AWSAssumeRoleExternalID           string
+	AWSBatchChangeSize                int
+	AWSBatchChangeSizeBytes           int
+	AWSBatchChangeSizeValues          int
+	AWSBatchChangeInterval            time.Duration
+	AWSEvaluateTargetHealth           bool
+	AWSAPIRetries                     int
+	AWSPreferCNAME                    bool
+	AWSZoneCacheDuration              time.Duration
+	AWSSDServiceCleanup               bool
+	AWSZoneMatchParent                bool
+	AWSDynamoDBRegion                 string
+	AWSDynamoDBTable                  string
+
+	AzureConfigFile                   string
+	AzureResourceGroup                string
+	AzureSubscriptionID               string
+	AzureUserAssignedIdentityClientID string
+	AzureActiveDirectoryAuthorityHost string
+
+	BluecatDNSConfiguration           string
+	BluecatConfigFile                 string
+	BluecatDNSView                    string
+	BluecatGatewayHost                string
+	BluecatRootZone                   string
+	BluecatDNSServerName              string
+	BluecatDNSDeployType              string
+	BluecatSkipTLSVerify              bool
+
+	CloudflareProxied                 bool
+	CloudflareDNSRecordsPerPage       int
+
+	CoreDNSPrefix                     string
+
+	DigitalOceanAPIPageSize           int
+
+	DynCustomerName                   string
+	DynUsername                       string
+	DynPassword                       string `secure:"yes"`
+	DynMinTTLSeconds                  int
+
+	ExoscaleEndpoint                  string
+	ExoscaleAPIKey                    string `secure:"yes"`
+	ExoscaleAPISecret                 string `secure:"yes"`
+	ExoscaleAPIEnvironment            string
+	ExoscaleAPIZone                   string
+
+	GoDaddyAPIKey                     string `secure:"yes"`
+	GoDaddySecretKey                  string `secure:"yes"`
+	GoDaddyTTL                        int64
+	GoDaddyOTE                        bool
+
+	GoogleProject                     string
+	GoogleBatchChangeSize             int
+	GoogleBatchChangeInterval         time.Duration
+	GoogleZoneVisibility              string
+
+	IBMCloudProxied                   bool
+	IBMCloudConfigFile                string
+
+	InMemoryZones                     []string
+
+	NS1Endpoint                       string
+	NS1IgnoreSSL                      bool
+	NS1MinTTLSeconds                  int
+
+	OCIConfigFile                     string
+	OCICompartmentOCID                string
+	OCIAuthInstancePrincipal          bool
+	OCIZoneScope                      string
+	OCIZoneCacheDuration              time.Duration
+
+	OVHEndpoint                       string
+	OVHApiRateLimit                   int
+
+
+	PiholeServer                      string
+	PiholePassword                    string `secure:"yes"`
+	PiholeTLSInsecureSkipVerify       bool
+
+	PluralCluster                     string
+	PluralProvider                    string
+
+	PDNSServer                        string
+	PDNSAPIKey                        string `secure:"yes"`
+	PDNSSkipTLSVerify                 bool
+
+	RcodezeroTXTEncrypt               bool
+
+	RFC2136Host                       string
+	RFC2136Port                       int
+	RFC2136Zone                       []string
+	RFC2136Insecure                   bool
+	RFC2136GSSTSIG                    bool
+	RFC2136KerberosRealm              string
+	RFC2136KerberosUsername           string
+	RFC2136KerberosPassword           string `secure:"yes"`
+	RFC2136TSIGKeyName                string
+	RFC2136TSIGSecret                 string `secure:"yes"`
+	RFC2136TSIGSecretAlg              string
+	RFC2136TAXFR                      bool
+	RFC2136MinTTL                     time.Duration
+	RFC2136BatchChangeSize            int
+	RFC2136UseTLS                     bool
+	RFC2136SkipTLSVerify              bool
+
+	TransIPAccountName                string
+	TransIPPrivateKeyFile             string
+
+	TencentCloudConfigFile            string
+	TencentCloudZoneType              string
+
+	WebhookProviderURL                string
+	WebhookProviderReadTimeout        time.Duration
+	WebhookProviderWriteTimeout       time.Duration
+
+	// Common settings
+
+	// Zones allows user to specify the zones to use and corresponding domains.
+	// Setting this will skip listing zones - which the user may not
+	// have IAM permissions to do. The user still needs IAM permission
+	// to each of the zones listed here.
+	// This applies to all providers that support multiple zones.
+	Zones map[string]string
+
 }
 
 var defaultConfig = &Config{
-	APIServerURL:                "",
-	KubeConfig:                  "",
-	RequestTimeout:              time.Second * 30,
-	DefaultTargets:              []string{},
-	GlooNamespaces:              []string{"gloo-system"},
-	SkipperRouteGroupVersion:    "zalando.org/v1",
-	Sources:                     nil,
-	Namespace:                   "",
-	AnnotationFilter:            "",
-	LabelFilter:                 labels.Everything().String(),
-	IngressClassNames:           nil,
-	FQDNTemplate:                "",
-	CombineFQDNAndAnnotation:    false,
-	IgnoreHostnameAnnotation:    false,
-	IgnoreIngressTLSSpec:        false,
-	IgnoreIngressRulesSpec:      false,
-	GatewayNamespace:            "",
-	GatewayLabelFilter:          "",
-	Compatibility:               "",
-	PublishInternal:             false,
-	PublishHostIP:               false,
-	ConnectorSourceServer:       "localhost:8080",
-	Provider:                    "",
-	GoogleProject:               "",
-	GoogleBatchChangeSize:       1000,
-	GoogleBatchChangeInterval:   time.Second,
-	GoogleZoneVisibility:        "",
-	DomainFilter:                []string{},
-	ZoneIDFilter:                []string{},
-	ExcludeDomains:              []string{},
-	RegexDomainFilter:           regexp.MustCompile(""),
-	RegexDomainExclusion:        regexp.MustCompile(""),
-	TargetNetFilter:             []string{},
-	ExcludeTargetNets:           []string{},
-	AlibabaCloudConfigFile:      "/etc/kubernetes/alibaba-cloud.json",
-	AWSZoneType:                 "",
-	AWSZoneTagFilter:            []string{},
-	AWSZoneMatchParent:          false,
-	AWSAssumeRole:               "",
-	AWSAssumeRoleExternalID:     "",
-	AWSBatchChangeSize:          1000,
-	AWSBatchChangeSizeBytes:     32000,
-	AWSBatchChangeSizeValues:    1000,
-	AWSBatchChangeInterval:      time.Second,
-	AWSEvaluateTargetHealth:     true,
-	AWSAPIRetries:               3,
-	AWSPreferCNAME:              false,
-	AWSZoneCacheDuration:        0 * time.Second,
-	AWSSDServiceCleanup:         false,
-	AWSDynamoDBRegion:           "",
-	AWSDynamoDBTable:            "external-dns",
-	AzureConfigFile:             "/etc/kubernetes/azure.json",
-	AzureResourceGroup:          "",
-	AzureSubscriptionID:         "",
-	BluecatConfigFile:           "/etc/kubernetes/bluecat.json",
-	BluecatDNSDeployType:        "no-deploy",
-	CloudflareProxied:           false,
-	CloudflareDNSRecordsPerPage: 100,
-	CoreDNSPrefix:               "/skydns/",
-	RcodezeroTXTEncrypt:         false,
-	AkamaiServiceConsumerDomain: "",
-	AkamaiClientToken:           "",
-	AkamaiClientSecret:          "",
-	AkamaiAccessToken:           "",
-	AkamaiEdgercSection:         "",
-	AkamaiEdgercPath:            "",
-	OCIConfigFile:               "/etc/kubernetes/oci.yaml",
-	OCIZoneScope:                "GLOBAL",
-	OCIZoneCacheDuration:        0 * time.Second,
-	InMemoryZones:               []string{},
-	OVHEndpoint:                 "ovh-eu",
-	OVHApiRateLimit:             20,
-	PDNSServer:                  "http://localhost:8081",
-	PDNSAPIKey:                  "",
-	PDNSSkipTLSVerify:           false,
-	TLSCA:                       "",
-	TLSClientCert:               "",
-	TLSClientCertKey:            "",
-	Policy:                      "sync",
-	Registry:                    "txt",
-	TXTOwnerID:                  "default",
-	TXTPrefix:                   "",
-	TXTSuffix:                   "",
-	TXTCacheInterval:            0,
-	TXTWildcardReplacement:      "",
-	MinEventSyncInterval:        5 * time.Second,
-	TXTEncryptEnabled:           false,
-	TXTEncryptAESKey:            "",
-	Interval:                    time.Minute,
-	Once:                        false,
-	DryRun:                      false,
-	UpdateEvents:                false,
-	LogFormat:                   "text",
-	MetricsAddress:              ":7979",
-	LogLevel:                    logrus.InfoLevel.String(),
-	ExoscaleAPIEnvironment:      "api",
-	ExoscaleAPIZone:             "ch-gva-2",
-	ExoscaleAPIKey:              "",
-	ExoscaleAPISecret:           "",
-	CRDSourceAPIVersion:         "externaldns.k8s.io/v1alpha1",
-	CRDSourceKind:               "DNSEndpoint",
-	ServiceTypeFilter:           []string{},
-	CFAPIEndpoint:               "",
-	CFUsername:                  "",
-	CFPassword:                  "",
-	RFC2136Host:                 "",
-	RFC2136Port:                 0,
-	RFC2136Zone:                 []string{},
-	RFC2136Insecure:             false,
-	RFC2136GSSTSIG:              false,
-	RFC2136KerberosRealm:        "",
-	RFC2136KerberosUsername:     "",
-	RFC2136KerberosPassword:     "",
-	RFC2136TSIGKeyName:          "",
-	RFC2136TSIGSecret:           "",
-	RFC2136TSIGSecretAlg:        "",
-	RFC2136TAXFR:                true,
-	RFC2136MinTTL:               0,
-	RFC2136BatchChangeSize:      50,
-	RFC2136UseTLS:               false,
-	RFC2136SkipTLSVerify:        false,
-	NS1Endpoint:                 "",
-	NS1IgnoreSSL:                false,
-	TransIPAccountName:          "",
-	TransIPPrivateKeyFile:       "",
-	DigitalOceanAPIPageSize:     50,
-	ManagedDNSRecordTypes:       []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
-	ExcludeDNSRecordTypes:       []string{},
-	GoDaddyAPIKey:               "",
-	GoDaddySecretKey:            "",
-	GoDaddyTTL:                  600,
-	GoDaddyOTE:                  false,
-	IBMCloudProxied:             false,
-	IBMCloudConfigFile:          "/etc/kubernetes/ibmcloud.json",
-	TencentCloudConfigFile:      "/etc/kubernetes/tencent-cloud.json",
-	TencentCloudZoneType:        "",
-	PiholeServer:                "",
-	PiholePassword:              "",
-	PiholeTLSInsecureSkipVerify: false,
-	PluralCluster:               "",
-	PluralProvider:              "",
-	WebhookProviderURL:          "http://localhost:8888",
-	WebhookProviderReadTimeout:  5 * time.Second,
-	WebhookProviderWriteTimeout: 10 * time.Second,
-	WebhookServer:               false,
-	TraefikDisableLegacy:        false,
-	TraefikDisableNew:           false,
+	Sources:              nil,
+	LabelFilter:          labels.Everything().String(),
+	Provider:             "",
+	DomainFilter:         []string{},
+	ZoneIDFilter:         []string{},
+	ExcludeDomains:       []string{},
+	RegexDomainFilter:    regexp.MustCompile(""),
+	RegexDomainExclusion: regexp.MustCompile(""),
+	TargetNetFilter:      []string{},
+	ExcludeTargetNets:    []string{},
+	TLSCA:                "",
+	TLSClientCert:        "",
+	TLSClientCertKey:       "",
+	Policy:                 "sync",
+	Registry:               "txt",
+	TXTOwnerID:             "default",
+	TXTPrefix:              "",
+	TXTSuffix:              "",
+	TXTCacheInterval:       0,
+	TXTWildcardReplacement: "",
+	MinEventSyncInterval:   5 * time.Second,
+	TXTEncryptEnabled:      false,
+	TXTEncryptAESKey:       "",
+	Interval:               time.Minute,
+	Once:                   false,
+	DryRun:                 false,
+	LogFormat:              "text",
+	MetricsAddress:         ":7979",
+	LogLevel:               logrus.InfoLevel.String(),
+	ManagedDNSRecordTypes:  []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME},
+	ExcludeDNSRecordTypes:  []string{},
+	WebhookServer:          false,
+
+	Config: source.Config{
+		APIServerURL:             "",
+		KubeConfig:               "",
+		RequestTimeout:           time.Second * 30,
+		DefaultTargets:           []string{},
+		GlooNamespaces:           []string{"gloo-system"},
+		SkipperRouteGroupVersion: "zalando.org/v1",
+		Namespace:                "",
+		AnnotationFilter:         "",
+		IngressClassNames:        nil,
+		FQDNTemplate:             "",
+		CombineFQDNAndAnnotation: false,
+		IgnoreHostnameAnnotation: false,
+		IgnoreIngressTLSSpec:     false,
+		IgnoreIngressRulesSpec:   false,
+		ConnectorServer:      "localhost:8080",
+		GatewayNamespace:         "",
+		GatewayLabelFilter:       "",
+		Compatibility:            "",
+		PublishInternal:          false,
+		PublishHostIP:            false,
+		UpdateEvents:             false,
+		CRDSourceAPIVersion:      "externaldns.k8s.io/v1alpha1",
+		CRDSourceKind:            "DNSEndpoint",
+		ServiceTypeFilter:        []string{},
+		CFAPIEndpoint:            "",
+		CFUsername:               "",
+		CFPassword:               "",
+		TraefikDisableLegacy:     false,
+		TraefikDisableNew:        false,
+	},
+
+
+	ProviderConfig: ProviderConfig{
+		GoogleProject:             "",
+		GoogleBatchChangeSize:     1000,
+		GoogleBatchChangeInterval: time.Second,
+		GoogleZoneVisibility:      "",
+
+		AlibabaCloudConfigFile:      "/etc/kubernetes/alibaba-cloud.json",
+		AWSZoneType:                 "",
+		AWSZoneTagFilter:            []string{},
+		AWSZoneMatchParent:          false,
+		AWSAssumeRole:               "",
+		AWSAssumeRoleExternalID:     "",
+		AWSBatchChangeSize:          1000,
+		AWSBatchChangeSizeBytes:     32000,
+		AWSBatchChangeSizeValues:    1000,
+		AWSBatchChangeInterval:      time.Second,
+		AWSEvaluateTargetHealth:     true,
+		AWSAPIRetries:               3,
+		AWSPreferCNAME:              false,
+		AWSZoneCacheDuration:        0 * time.Second,
+		AWSSDServiceCleanup:         false,
+		AWSDynamoDBRegion:           "",
+		AWSDynamoDBTable:            "external-dns",
+		AzureConfigFile:             "/etc/kubernetes/azure.json",
+		AzureResourceGroup:          "",
+		AzureSubscriptionID:         "",
+		BluecatConfigFile:           "/etc/kubernetes/bluecat.json",
+		BluecatDNSDeployType:        "no-deploy",
+		CloudflareProxied:           false,
+		CloudflareDNSRecordsPerPage: 100,
+		CoreDNSPrefix:               "/skydns/",
+		RcodezeroTXTEncrypt:         false,
+		AkamaiServiceConsumerDomain: "",
+		AkamaiClientToken:           "",
+		AkamaiClientSecret:          "",
+		AkamaiAccessToken:           "",
+		AkamaiEdgercSection:         "",
+		AkamaiEdgercPath:            "",
+		OCIConfigFile:               "/etc/kubernetes/oci.yaml",
+		OCIZoneScope:                "GLOBAL",
+		OCIZoneCacheDuration:        0 * time.Second,
+		InMemoryZones:               []string{},
+		OVHEndpoint:                 "ovh-eu",
+		OVHApiRateLimit:             20,
+		PDNSServer:                  "http://localhost:8081",
+		PDNSAPIKey:                  "",
+		PDNSSkipTLSVerify:           false,
+		ExoscaleAPIEnvironment:      "api",
+		ExoscaleAPIZone:             "ch-gva-2",
+		ExoscaleAPIKey:              "",
+		ExoscaleAPISecret:           "",
+		RFC2136Host:                 "",
+		RFC2136Port:                 0,
+		RFC2136Zone:                 []string{},
+		RFC2136Insecure:             false,
+		RFC2136GSSTSIG:              false,
+		RFC2136KerberosRealm:        "",
+		RFC2136KerberosUsername:     "",
+		RFC2136KerberosPassword:     "",
+		RFC2136TSIGKeyName:          "",
+		RFC2136TSIGSecret:           "",
+		RFC2136TSIGSecretAlg:        "",
+		RFC2136TAXFR:                true,
+		RFC2136MinTTL:               0,
+		RFC2136BatchChangeSize:      50,
+		RFC2136UseTLS:               false,
+		RFC2136SkipTLSVerify:        false,
+		NS1Endpoint:                 "",
+		NS1IgnoreSSL:                false,
+		TransIPAccountName:          "",
+		TransIPPrivateKeyFile:       "",
+		DigitalOceanAPIPageSize:     50,
+		GoDaddyAPIKey:               "",
+		GoDaddySecretKey:            "",
+		GoDaddyTTL:                  600,
+		GoDaddyOTE:                  false,
+		IBMCloudProxied:             false,
+		IBMCloudConfigFile:          "/etc/kubernetes/ibmcloud.json",
+		TencentCloudConfigFile:      "/etc/kubernetes/tencent-cloud.json",
+		TencentCloudZoneType:        "",
+		PiholeServer:                "",
+		PiholePassword:              "",
+		PiholeTLSInsecureSkipVerify: false,
+		PluralCluster:               "",
+		PluralProvider:              "",
+		WebhookProviderURL:          "http://localhost:8888",
+		WebhookProviderReadTimeout:  5 * time.Second,
+		WebhookProviderWriteTimeout: 10 * time.Second,
+	},
 }
 
 // NewConfig returns new Config object
@@ -399,10 +469,13 @@ func allLogLevelsAsStrings() []string {
 	return levels
 }
 
+// TODO: cmd (cobra) should be separate from the API
+
 // ParseFlags adds and parses flags from command line
 func (cfg *Config) ParseFlags(args []string) error {
 	app := kingpin.New("external-dns", "ExternalDNS synchronizes exposed Kubernetes Services and Ingresses with DNS providers.\n\nNote that all flags may be replaced with env vars - `--flag` -> `EXTERNAL_DNS_FLAG=1` or `--flag value` -> `EXTERNAL_DNS_FLAG=value`")
 	app.Version(Version)
+	// Enable the use of env variables for all flags.
 	app.DefaultEnvars()
 
 	// Flags related to Kubernetes
@@ -440,7 +513,7 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("publish-internal-services", "Allow external-dns to publish DNS records for ClusterIP services (optional)").BoolVar(&cfg.PublishInternal)
 	app.Flag("publish-host-ip", "Allow external-dns to publish host-ip for headless services (optional)").BoolVar(&cfg.PublishHostIP)
 	app.Flag("always-publish-not-ready-addresses", "Always publish also not ready addresses for headless services (optional)").BoolVar(&cfg.AlwaysPublishNotReadyAddresses)
-	app.Flag("connector-source-server", "The server to connect for connector source, valid only when using connector source").Default(defaultConfig.ConnectorSourceServer).StringVar(&cfg.ConnectorSourceServer)
+	app.Flag("connector-source-server", "The server to connect for connector source, valid only when using connector source").Default(defaultConfig.ConnectorServer).StringVar(&cfg.ConnectorServer)
 	app.Flag("crd-source-apiversion", "API version of the CRD for crd source, e.g. `externaldns.k8s.io/v1alpha1`, valid only when using crd source").Default(defaultConfig.CRDSourceAPIVersion).StringVar(&cfg.CRDSourceAPIVersion)
 	app.Flag("crd-source-kind", "Kind of the CRD for the crd source in API group and version specified by crd-source-apiversion").Default(defaultConfig.CRDSourceKind).StringVar(&cfg.CRDSourceKind)
 	app.Flag("service-type-filter", "The service types to take care about (default: all, expected: ClusterIP, NodePort, LoadBalancer or ExternalName)").StringsVar(&cfg.ServiceTypeFilter)

@@ -115,48 +115,23 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go serveMetrics(cfg.MetricsAddress)
+	// No need to register metrics or signal handling if we're running in once mode.
+	// TODO: switch to OTel, generate traces too
+	if !cfg.Once {
+		go serveMetrics(cfg.MetricsAddress)
+	}
 	go handleSigterm(cancel)
 
 	// error is explicitly ignored because the filter is already validated in validation.ValidateConfig
 	labelSelector, _ := labels.Parse(cfg.LabelFilter)
 
 	// Create a source.Config from the flags passed by the user.
-	sourceCfg := &source.Config{
-		Namespace:                      cfg.Namespace,
-		AnnotationFilter:               cfg.AnnotationFilter,
-		LabelFilter:                    labelSelector,
-		IngressClassNames:              cfg.IngressClassNames,
-		FQDNTemplate:                   cfg.FQDNTemplate,
-		CombineFQDNAndAnnotation:       cfg.CombineFQDNAndAnnotation,
-		IgnoreHostnameAnnotation:       cfg.IgnoreHostnameAnnotation,
-		IgnoreIngressTLSSpec:           cfg.IgnoreIngressTLSSpec,
-		IgnoreIngressRulesSpec:         cfg.IgnoreIngressRulesSpec,
-		GatewayNamespace:               cfg.GatewayNamespace,
-		GatewayLabelFilter:             cfg.GatewayLabelFilter,
-		Compatibility:                  cfg.Compatibility,
-		PublishInternal:                cfg.PublishInternal,
-		PublishHostIP:                  cfg.PublishHostIP,
-		AlwaysPublishNotReadyAddresses: cfg.AlwaysPublishNotReadyAddresses,
-		ConnectorServer:                cfg.ConnectorSourceServer,
-		CRDSourceAPIVersion:            cfg.CRDSourceAPIVersion,
-		CRDSourceKind:                  cfg.CRDSourceKind,
-		KubeConfig:                     cfg.KubeConfig,
-		APIServerURL:                   cfg.APIServerURL,
-		ServiceTypeFilter:              cfg.ServiceTypeFilter,
-		CFAPIEndpoint:                  cfg.CFAPIEndpoint,
-		CFUsername:                     cfg.CFUsername,
-		CFPassword:                     cfg.CFPassword,
-		GlooNamespaces:                 cfg.GlooNamespaces,
-		SkipperRouteGroupVersion:       cfg.SkipperRouteGroupVersion,
-		RequestTimeout:                 cfg.RequestTimeout,
-		DefaultTargets:                 cfg.DefaultTargets,
-		OCPRouterName:                  cfg.OCPRouterName,
-		UpdateEvents:                   cfg.UpdateEvents,
-		ResolveLoadBalancerHostname:    cfg.ResolveServiceLoadBalancerHostname,
-		TraefikDisableLegacy:           cfg.TraefikDisableLegacy,
-		TraefikDisableNew:              cfg.TraefikDisableNew,
-	}
+	// The flags are stored in the Config struct, so we can pass it directly - but
+	// there are 3 exceptions
+	sourceCfg := &cfg.Config
+	// TODO: rename to avoid confusion and keep the config struct clean
+	sourceCfg.LabelFilter = labelSelector
+	sourceCfg.ResolveLoadBalancerHostname = cfg.ResolveServiceLoadBalancerHostname
 
 	// Lookup all the selected sources by names and pass them the desired configuration.
 	sources, err := source.ByNames(ctx, &source.SingletonClientGenerator{
@@ -261,11 +236,7 @@ func main() {
 	case "rcodezero":
 		p, err = rcode0.NewRcodeZeroProvider(domainFilter, cfg.DryRun, cfg.RcodezeroTXTEncrypt)
 	case "google":
-		p, err = google.NewGoogleProvider(ctx, &google.GoogleProviderCfg{
-			Project:             cfg.GoogleProject,
-			BatchChangeSize:     cfg.GoogleBatchChangeSize,
-			BatchChangeInterval: cfg.GoogleBatchChangeInterval,
-		}, &domainFilter, &zoneIDFilter, cfg.GoogleZoneVisibility, cfg.DryRun)
+		p, err = google.NewGoogleProvider(ctx, &cfg.ProviderConfig, &domainFilter, &zoneIDFilter, cfg.DryRun)
 	case "digitalocean":
 		p, err = digitalocean.NewDigitalOceanProvider(ctx, domainFilter, cfg.DryRun, cfg.DigitalOceanAPIPageSize)
 	case "ovh":

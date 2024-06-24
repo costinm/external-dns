@@ -1,0 +1,11 @@
+# Example of a multi-config file for external-dns
+
+syncTargets:
+  "inmemory":
+    provider: inmemory
+    sources:
+      - k8s
+
+serverConfig:
+  serverAddress: ":8080"
+  monitorAddress: ":7080"

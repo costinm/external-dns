@@ -30,33 +30,40 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type PodInternalSource struct {
+type K8SSource struct {
 	client        kubernetes.Interface
 	podInformer   coreinformers.PodInformer
 	nodeInformer  coreinformers.NodeInformer
 	compatibility string
 
 	Internal string
-	PodInternalSourceCfg
+	K8SSourceConfig
 }
 
-type PodInternalSourceCfg struct {
+// K8SSourceConfig is used to configure a new K8SSource, which creates DNS entries
+// for all Nodes, Pods, Services and objects in one cluster.
+type K8SSourceConfig struct {
 	podInformer   coreinformers.PodInformer
 	nodeInformer  coreinformers.NodeInformer
 
 }
 
-// NewPodInternalSource creates a new source that syncs up all pods to an internal zone, using podname.NAMESPACE.SUFFIX as the DNS name.
+// NewK8SSource creates a new source that syncs up all pods to an internal zone, using podname.NAMESPACE.SUFFIX as the DNS name.
 // TODO: This will create TXT, SRV  and PTR records as well.
-func NewPodInternalSource(ctx context.Context, kubeClient kubernetes.Interface) (*PodInternalSource, error) {
-	ps := &PodInternalSource{
+func NewK8SSource(p ClientGenerator, config *Config) (*K8SSource, error) {
+	kubeClient, err := p.KubeClient()
+	if err != nil {
+		return nil, err
+	}
+	ps := &K8SSource{
 		client:        kubeClient,
 	}
-	return ps, ps.Init(ctx)
+	return ps, ps.Init(context.Background())
 }
 
-func (ps *PodInternalSource) Init(ctx context.Context) error {
+func (ps *K8SSource) Init(ctx context.Context) error {
 	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(ps.client, 0, kubeinformers.WithNamespace(""))
+
 	podInformer := informerFactory.Core().V1().Pods()
 	nodeInformer := informerFactory.Core().V1().Nodes()
 
@@ -98,10 +105,13 @@ func (ps *PodInternalSource) Init(ctx context.Context) error {
 	return nil
 }
 
-func (*PodInternalSource) AddEventHandler(ctx context.Context, handler func()) {
+// AddEventHandler is supposed to trigger a full resync. This is not supported and
+// should not be implemented - too much data and overhead. Instead, this source
+// should send incremental updates. See Istio ServiceEntry source as well.
+func (*K8SSource) AddEventHandler(ctx context.Context, handler func()) {
 }
 
-func (ps *PodInternalSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
+func (ps *K8SSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	pods, err := ps.podInformer.Lister().Pods("").List(labels.Everything())
 	if err != nil {
 		return nil, err

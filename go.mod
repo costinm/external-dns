@@ -2,7 +2,7 @@ module sigs.k8s.io/external-dns
 
 go 1.22.4
 
-// 	sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
+replace sigs.k8s.io/external-dns latest => github.com/costinm/external-dns latest
 replace sigs.k8s.io/external-dns/provider/google => ./provider/google
 
 require (

@@ -65,6 +65,8 @@ type ServiceEntrySource struct {
 type ServiceEntrySourceConfig struct {
 	// MeshExternalNamespace is the namespace for MESH_EXTERNAL ServiceEntry.
 	// Allowing arbitrary untrusted namespaces to define DNS records is a security risk.
+	// This is the same concept with the namespace param of external-dns, limits the
+	// dangerous, unbound entries - but this source also handles mesh internal.
 	MeshExternalNamespace string
 
 	// MeshInternalDomain is the domain suffix for MESH_INTERNAL ServiceEntry.

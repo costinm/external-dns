@@ -5,7 +5,7 @@ go 1.22.2
 toolchain go1.22.4
 
 replace (
-	sigs.k8s.io/external-dns => ../../.. 
+	sigs.k8s.io/external-dns => ../..
 )
 
 require (

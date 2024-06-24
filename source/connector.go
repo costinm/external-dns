@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/gob"
 	"net"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,9 @@ func NewConnectorSource(remoteServer string) (Source, error) {
 // Endpoints returns endpoint objects.
 func (cs *connectorSource) Endpoints(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	endpoints := []*endpoint.Endpoint{}
+
+	if strings.Contains(cs.remoteServer, "://") {
+	}
 
 	conn, err := net.DialTimeout("tcp", cs.remoteServer, dialTimeout)
 	if err != nil {
