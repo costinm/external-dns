@@ -454,7 +454,7 @@ func NewKubeClient(kubeConfig, apiServerURL string, requestTimeout time.Duration
 // KubeConfig attribute to connect to the cluster. If KubeConfig isn't provided
 // it defaults to using the recommended default.
 // NB: Istio controls the creation of the underlying Kubernetes client, so we
-// have no ability to tack on transport wrappers (e.g., Prometheus request
+// have no ability to tack on transport wrappers (e.g., MetricReader request
 // wrappers) to the client's config at this level. Furthermore, the Istio client
 // constructor does not expose the ability to override the Kubernetes API server endpoint,
 // so the apiServerURL config attribute has no effect.

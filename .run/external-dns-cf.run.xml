@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="external-dns-cf" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <working_directory value="$PROJECT_DIR$" />
+    <useCustomBuildTags value="true" />
+    <parameters value="--source=gateway-httproute --source=gateway-tlsroute --source=gateway-tcproute --source=gateway-udproute --source=gateway-grpcroute --source=crd --source=service --source=istio-virtualservice --publish-internal-services --registry=txt --txt-owner-id=costinm --log-level=debug --provider=cloudflare --domain-filter=webinf.info." />
+    <envs>
+      <env name="CF_API_TOKEN" value="file:$USER_HOME$/.ssh/cloudflare/dns_token" />
+    </envs>
+    <kind value="PACKAGE" />
+    <package value="sigs.k8s.io/external-dns" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/main.go" />
+    <method v="2" />
+  </configuration>
+</component>
